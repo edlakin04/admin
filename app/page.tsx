@@ -186,8 +186,8 @@ async function sendSolTransaction(
     ?? "https://api.mainnet-beta.solana.com";
 
   const connection  = new Connection(rpcUrl, "confirmed");
-  const { publicKey } = await window.solana.connect();
-  const fromPubkey  = publicKey;
+  const { publicKey: rawKey } = await window.solana.connect();
+  const fromPubkey  = new PublicKey(rawKey.toBase58());
   const toPubkey    = new PublicKey(toWallet);
   const lamports    = Math.round(amountSol * LAMPORTS_PER_SOL);
 
