@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createHmac }   from "crypto";
+import { verifySessionValue } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
@@ -17,24 +18,7 @@ function makeSessionValue(password: string): string {
   return `${ts}:${hmac}`;
 }
 
-export function verifySessionValue(value: string, password: string): boolean {
-  const [ts, hash] = (value ?? "").split(":");
-  if (!ts || !hash) return false;
 
-  // Check expiry (12 hours)
-  const age = Date.now() - parseInt(ts, 10);
-  if (age > SESSION_MAX_AGE * 1000) return false;
-
-  // Re-compute and compare — timing-safe
-  const expected = createHmac("sha256", password).update(ts).digest("hex");
-  if (expected.length !== hash.length) return false;
-
-  let diff = 0;
-  for (let i = 0; i < expected.length; i++) {
-    diff |= expected.charCodeAt(i) ^ hash.charCodeAt(i);
-  }
-  return diff === 0;
-}
 
 // ─── POST /api/auth/login ─────────────────────────────────────────────────────
 // Body: { password: string }
