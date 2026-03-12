@@ -1,0 +1,8 @@
+{
+  "crons": [
+    {
+      "path": "/api/cron/close-batch",
+      "schedule": "0 0 * * *"
+    }
+  ]
+}
