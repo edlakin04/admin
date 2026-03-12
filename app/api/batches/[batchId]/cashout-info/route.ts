@@ -1,6 +1,6 @@
 import { NextResponse }       from "next/server";
 import { cookies }            from "next/headers";
-import { verifySessionValue } from "@/app/api/auth/login/route";
+import { verifySessionValue } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
