@@ -151,13 +151,14 @@ export async function POST(
     if (updateErr) return NextResponse.json({ error: updateErr.message }, { status: 500 });
 
     // Also mark the matching affiliate_earnings rows as paid_out
-    await sb
-      .from("affiliate_earnings")
-      .update({ paid_out: true })
-      .eq("referrer_wallet", payout.referrer_wallet)
-      .gte("created_at", batch.period_start)
-      .lt("created_at",  batch.period_end)
-      .catch(() => null);
+    await Promise.resolve(
+      sb
+        .from("affiliate_earnings")
+        .update({ paid_out: true })
+        .eq("referrer_wallet", payout.referrer_wallet)
+        .gte("created_at", batch.period_start)
+        .lt("created_at",  batch.period_end)
+    ).catch(() => null);
 
     // ── 6. Check if all payouts for this batch are now paid ──────────────────
     const { data: remainingUnpaid } = await sb
