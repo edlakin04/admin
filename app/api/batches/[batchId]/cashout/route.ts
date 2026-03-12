@@ -2,7 +2,7 @@ import { NextResponse }          from "next/server";
 import { cookies }               from "next/headers";
 import { Connection, PublicKey } from "@solana/web3.js";
 import { supabaseAdmin }         from "@/lib/supabaseAdmin";
-import { verifySessionValue }    from "@/app/api/auth/login/route";
+import { verifySessionValue }    from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
