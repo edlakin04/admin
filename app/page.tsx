@@ -104,7 +104,6 @@ const S = {
   btn: (variant: "primary" | "secondary" | "danger" | "ghost") => ({
     padding: "8px 16px",
     borderRadius: "8px",
-    border: "none",
     fontWeight: 600,
     fontSize: "13px",
     cursor: "pointer",
