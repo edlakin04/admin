@@ -526,6 +526,11 @@ export default function AdminDashboard() {
   const [err,         setErr]         = useState<string | null>(null);
   const [batches,     setBatches]     = useState<Batch[]>([]);
   const [solGbpPrice, setSolGbpPrice] = useState<number | null>(null);
+  const [vatWarnings, setVatWarnings] = useState<{
+    hasWarnings: boolean;
+    hasCritical: boolean;
+    warnings: Array<{ jurisdiction: string; jurisdictionName: string; warningLevel: string; pctUsed: number; thresholdLabel: string }>;
+  } | null>(null);
 
   const load = useCallback(async () => {
     try {
