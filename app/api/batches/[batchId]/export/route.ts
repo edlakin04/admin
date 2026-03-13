@@ -3,6 +3,13 @@ import { cookies }                   from "next/headers";
 import { supabaseAdmin }             from "@/lib/supabaseAdmin";
 import { verifySessionValue }        from "@/lib/auth";
 import { getSolGbpPrice, solToGbp, fmtSol, fmtGbp } from "@/lib/solPrice";
+import {
+  getCountryRule,
+  getJurisdictionName,
+  THRESHOLD_JURISDICTIONS,
+  IMMEDIATE_JURISDICTIONS,
+  JURISDICTION_THRESHOLDS,
+} from "@/lib/vatRules";
 
 export const dynamic = "force-dynamic";
 
@@ -50,10 +57,25 @@ export async function GET(
     // ── Load individual payments in this batch ───────────────────────────────
     const { data: payments } = await sb
       .from("payments")
-      .select("wallet, kind, amount_sol, referrer_wallet, created_at")
+      .select("wallet, kind, amount_sol, referrer_wallet, created_at, declared_country, ip_country, country_mismatch, vat_rate, vat_amount_sol, vat_amount_gbp, vat_jurisdiction, sol_gbp_rate_at_payment")
       .gte("created_at", batch.period_start)
       .lt("created_at",  batch.period_end)
       .order("created_at", { ascending: true });
+
+    // ── Load VAT cumulative data ──────────────────────────────────────────
+    const { data: vatCumulative } = await sb
+      .from("vat_cumulative")
+      .select("jurisdiction, revenue_gbp, revenue_native, native_currency, threshold_amount, threshold_currency, threshold_crossed, threshold_crossed_at, vat_rate, payment_count")
+      .order("jurisdiction");
+
+    const { data: vatRegistrations } = await sb
+      .from("vat_registrations")
+      .select("jurisdiction, registration_no");
+
+    const vatRegMap: Record<string, string | null> = {};
+    for (const r of vatRegistrations ?? []) {
+      vatRegMap[r.jurisdiction] = r.registration_no ?? null;
+    }
 
     const paymentList = payments ?? [];
 
@@ -143,10 +165,12 @@ export async function GET(
       lines.push("  Individual payments:");
       lines.push("");
       for (const p of paymentList) {
-        const kind   = p.kind === "subscription" ? "User sub" : "Dev sub ";
-        const ref    = p.referrer_wallet ? `  [ref: ${p.referrer_wallet.slice(0,4)}…${p.referrer_wallet.slice(-4)}]` : "";
-        const wallet = `${p.wallet.slice(0,4)}…${p.wallet.slice(-4)}`;
-        lines.push(`  ${fmtDate(p.created_at)}  ${kind}  ${wallet}  ${fmtSol(Number(p.amount_sol))}${ref}`);
+        const kind     = p.kind === "subscription" ? "User sub" : "Dev sub ";
+        const ref      = p.referrer_wallet ? `  [ref: ${p.referrer_wallet.slice(0,4)}…${p.referrer_wallet.slice(-4)}]` : "";
+        const wallet   = `${p.wallet.slice(0,4)}…${p.wallet.slice(-4)}`;
+        const country  = p.declared_country ? `  ${p.declared_country}` : "";
+        const mismatch = p.country_mismatch  ? "  ⚠ IP mismatch" : "";
+        lines.push(`  ${fmtDate(p.created_at)}  ${kind}  ${wallet}  ${fmtSol(Number(p.amount_sol))}${country}${mismatch}${ref}`);
       }
       lines.push("");
     }
@@ -202,6 +226,152 @@ export async function GET(
       ? `${batch.cashout_tx_signature.slice(0,8)}…${batch.cashout_tx_signature.slice(-8)}`
       : "—"
     ));
+    lines.push("");
+
+    // ── VAT / Tax Summary ─────────────────────────────────────────────────────
+    lines.push(divider());
+    lines.push("  VAT / TAX SUMMARY");
+    lines.push(divider());
+    lines.push("");
+    lines.push("  NOTE: VAT is absorbed from revenue — customers are not charged extra.");
+    lines.push(`  SOL/GBP rate used: ${solGbpPrice ? `£${solGbpPrice.toFixed(2)}` : "unavailable"}`);
+    lines.push("");
+
+    // Compute per-jurisdiction VAT for this batch from payment data
+    const batchVatByJurisdiction: Record<string, {
+      jurisdictionName: string;
+      paymentCount:     number;
+      revenueGbp:       number;
+      vatOwedGbp:       number;
+      vatRate:          number;
+      countries:        Set<string>;
+      mismatches:       number;
+    }> = {};
+
+    for (const p of paymentList) {
+      const jurisdiction = (p.vat_jurisdiction as string | null) ?? "NONE";
+      if (jurisdiction === "NONE" || jurisdiction === "BLOCKED") continue;
+
+      if (!batchVatByJurisdiction[jurisdiction]) {
+        batchVatByJurisdiction[jurisdiction] = {
+          jurisdictionName: getJurisdictionName(jurisdiction),
+          paymentCount:     0,
+          revenueGbp:       0,
+          vatOwedGbp:       0,
+          vatRate:          Number(p.vat_rate ?? 0),
+          countries:        new Set(),
+          mismatches:       0,
+        };
+      }
+
+      const gbp = solGbpPrice
+        ? Math.round(Number(p.amount_sol ?? 0) * solGbpPrice * 100) / 100
+        : 0;
+
+      batchVatByJurisdiction[jurisdiction].paymentCount++;
+      batchVatByJurisdiction[jurisdiction].revenueGbp  += gbp;
+      batchVatByJurisdiction[jurisdiction].vatOwedGbp  += Number(p.vat_amount_gbp ?? 0);
+      if (p.declared_country) batchVatByJurisdiction[jurisdiction].countries.add(p.declared_country);
+      if (p.country_mismatch) batchVatByJurisdiction[jurisdiction].mismatches++;
+    }
+
+    // Also show payments with no jurisdiction (no country recorded)
+    const noCountryPayments = paymentList.filter((p) => !p.declared_country).length;
+
+    // ── Threshold status table ────────────────────────────────────────────
+    lines.push("  THRESHOLD STATUS (cumulative all-time revenue)");
+    lines.push("");
+    lines.push(`  ${"Jurisdiction".padEnd(16)} ${"Threshold".padEnd(12)} ${"Cumulative".padEnd(14)} ${"Used".padEnd(8)} Status`);
+    lines.push(`  ${"-".repeat(62)}`);
+
+    for (const row of vatCumulative ?? []) {
+      const j        = row.jurisdiction as string;
+      const isThresh = (THRESHOLD_JURISDICTIONS as readonly string[]).includes(j);
+      if (!isThresh) continue;
+
+      const threshInfo  = JURISDICTION_THRESHOLDS[j];
+      const revenueNat  = Number(row.revenue_native ?? 0);
+      const threshold   = row.threshold_amount ? Number(row.threshold_amount) : null;
+      const pct         = threshold && revenueNat > 0
+        ? Math.min(100, Math.round((revenueNat / threshold) * 1000) / 10)
+        : 0;
+      const crossed     = row.threshold_crossed ?? false;
+      const statusLabel = crossed ? "CROSSED — REGISTER" :
+        pct >= 95 ? "CRITICAL >95%" :
+        pct >= 80 ? "WARNING >80%"  : "Below threshold";
+
+      const name = getJurisdictionName(j).padEnd(16);
+      const thr  = (threshInfo?.label ?? "—").padEnd(12);
+      const cum  = `${revenueNat.toFixed(2)} ${row.native_currency ?? ""}`.padEnd(14);
+      const used = `${pct.toFixed(1)}%`.padEnd(8);
+      lines.push(`  ${name} ${thr} ${cum} ${used} ${statusLabel}`);
+    }
+    lines.push("");
+
+    // ── VAT registration numbers ──────────────────────────────────────────
+    lines.push("  VAT REGISTRATION NUMBERS");
+    const regKeys = ["UK", "EU_OSS", "AU", "CA", "NO", "NZ", "CH"];
+    for (const k of regKeys) {
+      const regNo = vatRegMap[k];
+      const name  = getJurisdictionName(k);
+      lines.push(`  ${name.padEnd(30)} ${regNo ?? "Not yet registered"}`);
+    }
+    lines.push("");
+
+    // ── Batch VAT breakdown by country ────────────────────────────────────
+    lines.push("  BATCH VAT BREAKDOWN");
+    lines.push("");
+
+    if (Object.keys(batchVatByJurisdiction).length === 0) {
+      lines.push("  No payments with country data recorded in this batch.");
+    } else {
+      for (const [jurisdiction, data] of Object.entries(batchVatByJurisdiction)) {
+        const cumRow    = (vatCumulative ?? []).find((r) => r.jurisdiction === jurisdiction);
+        const crossed   = cumRow?.threshold_crossed ?? false;
+        const isIm      = (IMMEDIATE_JURISDICTIONS as readonly string[]).includes(jurisdiction);
+        const vatActive = crossed || isIm;
+        const threshInfo = JURISDICTION_THRESHOLDS[jurisdiction];
+        const regNo     = vatRegMap[jurisdiction];
+        const countriesStr = Array.from(data.countries).sort().join(", ") || "—";
+
+        lines.push(`  ${data.jurisdictionName} — ${data.paymentCount} payment${data.paymentCount !== 1 ? "s" : ""} — ${fmtGbp(Math.round(data.revenueGbp * 100) / 100)} revenue`);
+        if (data.countries.size > 1) {
+          lines.push(`     Countries:         ${countriesStr}`);
+        }
+        lines.push(`     VAT rate:          ${vatActive && data.vatRate > 0 ? `${(data.vatRate * 100).toFixed(1)}% (${isIm ? "IMMEDIATE — no threshold" : "REGISTERED — above threshold"})` : `0% (${threshInfo ? `below ${threshInfo.label} threshold` : "no obligation"})`}`);
+        if (regNo) {
+          lines.push(`     Registration:      ${regNo}`);
+        }
+        lines.push(`     VAT owed:          ${fmtGbp(Math.round(data.vatOwedGbp * 100) / 100)}`);
+        if (data.mismatches > 0) {
+          lines.push(`     ⚠ IP mismatches:   ${data.mismatches} payment${data.mismatches !== 1 ? "s" : ""} — verify manually`);
+        }
+        lines.push("");
+      }
+
+      // Payments without country
+      if (noCountryPayments > 0) {
+        lines.push(`  Unknown country — ${noCountryPayments} payment${noCountryPayments !== 1 ? "s" : ""} (no country data recorded)`);
+        lines.push("");
+      }
+    }
+
+    // ── Batch VAT total ───────────────────────────────────────────────────
+    const batchVatTotal = Math.round(
+      Object.values(batchVatByJurisdiction)
+        .reduce((sum, d) => sum + d.vatOwedGbp, 0) * 100
+    ) / 100;
+
+    lines.push(`  ${"─".repeat(40)}`);
+    lines.push(line("  Total VAT owed this batch:", fmtGbp(batchVatTotal)));
+    lines.push("");
+
+    if (batchVatTotal === 0) {
+      lines.push("  All jurisdictions currently below registration thresholds.");
+      lines.push("  No VAT registration or payment required at this time.");
+    } else {
+      lines.push("  ⚠ VAT IS OWED — include in your tax returns.");
+    }
     lines.push("");
 
     // ── GBP bank field (blank — fill in manually) ─────────────────────────────
