@@ -68,7 +68,7 @@ export async function GET(req: Request) {
     // Pull every payment that was made during this batch window
     const { data: payments, error: payErr } = await sb
       .from("payments")
-      .select("id, wallet, kind, amount_sol, referrer_wallet, created_at")
+      .select("wallet, kind, amount_sol, referrer_wallet, created_at")
       .gte("created_at", periodStart)
       .lt("created_at", periodEnd);
 
