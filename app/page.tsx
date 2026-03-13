@@ -537,6 +537,19 @@ export default function AdminDashboard() {
       }
       setBatches(json.batches ?? []);
       setSolGbpPrice(json.solGbpPrice ?? null);
+
+      // Fetch VAT threshold warnings silently
+      try {
+        const vatRes  = await fetch("/api/vat", { cache: "no-store" });
+        const vatJson = await vatRes.json().catch(() => null);
+        if (vatRes.ok && vatJson?.ok) {
+          setVatWarnings({
+            hasWarnings: vatJson.hasWarnings ?? false,
+            hasCritical: vatJson.hasCritical ?? false,
+            warnings:    vatJson.warnings    ?? [],
+          });
+        }
+      } catch { /* non-fatal */ }
     } catch (e: any) {
       setErr(e?.message ?? "Failed to load");
     } finally {
@@ -585,6 +598,7 @@ export default function AdminDashboard() {
             </div>
           </div>
           <div style={{ display: "flex", gap: "8px" }}>
+            <a href="/vat" style={S.btn("secondary")}>VAT</a>
             <a href="/history" style={S.btn("secondary")}>History</a>
             <button style={S.btn("ghost")} onClick={logout}>Log out</button>
           </div>
@@ -602,6 +616,37 @@ export default function AdminDashboard() {
           }}>
             {err}
           </div>
+        )}
+
+        {/* VAT threshold warning banner */}
+        {vatWarnings?.hasWarnings && (
+          <a href="/vat" style={{ textDecoration: "none" }}>
+            <div style={{
+              padding:      "12px 16px",
+              borderRadius: "10px",
+              background:   vatWarnings.hasCritical ? "rgba(239,68,68,0.1)" : "rgba(245,158,11,0.1)",
+              border:       `1px solid ${vatWarnings.hasCritical ? "rgba(239,68,68,0.3)" : "rgba(245,158,11,0.3)"}`,
+              marginBottom: "16px",
+              cursor:       "pointer",
+            }}>
+              <div style={{
+                fontWeight: 700,
+                fontSize:   "13px",
+                color:      vatWarnings.hasCritical ? "#ef4444" : "#f59e0b",
+                marginBottom: "4px",
+              }}>
+                {vatWarnings.hasCritical ? "⚠ Critical — VAT threshold almost reached" : "⚠ Warning — Approaching VAT threshold"}
+              </div>
+              {vatWarnings.warnings.map((w) => (
+                <div key={w.jurisdiction} style={{ fontSize: "12px", color: "#a1a1aa" }}>
+                  {w.jurisdictionName} — {w.pctUsed?.toFixed(1)}% of {w.thresholdLabel} used
+                </div>
+              ))}
+              <div style={{ fontSize: "11px", color: "#71717a", marginTop: "6px" }}>
+                Click to view VAT dashboard →
+              </div>
+            </div>
+          </a>
         )}
 
         {/* Active batches (open + unpaid closed) */}
