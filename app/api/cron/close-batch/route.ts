@@ -18,11 +18,26 @@ export const dynamic = "force-dynamic";
 export async function GET(req: Request) {
   try {
     // ── Auth ────────────────────────────────────────────────────────────────
+    // Vercel cron sends the secret as "Authorization: Bearer SECRET"
+    // Manual calls can use ?secret=SECRET or x-cron-secret header
     const { searchParams } = new URL(req.url);
-    const secret = searchParams.get("secret") ?? req.headers.get("x-cron-secret") ?? "";
     const cronSecret = process.env.ADMIN_CRON_SECRET;
 
-    if (!cronSecret || secret !== cronSecret) {
+    if (!cronSecret) {
+      return NextResponse.json({ error: "ADMIN_CRON_SECRET not configured" }, { status: 500 });
+    }
+
+    const authHeader  = (req.headers.get("authorization") ?? "").trim();
+    const secretParam = (searchParams.get("secret") ?? "").trim();
+    const secretHeader = (req.headers.get("x-cron-secret") ?? "").trim();
+
+    const authorized =
+      authHeader === `Bearer ${cronSecret}` ||
+      authHeader === cronSecret ||
+      secretParam === cronSecret ||
+      secretHeader === cronSecret;
+
+    if (!authorized) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
