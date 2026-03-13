@@ -15,6 +15,15 @@ const LOGIN_PATH     = "/login";
 const LOGIN_API      = "/api/auth/login";
 const CRON_API       = "/api/cron";
 
+// ── Protected routes (all require valid admin session) ────────────────────────
+// /              — main dashboard
+// /history       — batch history
+// /vat           — VAT / tax dashboard
+// /api/batches/* — batch data API
+// /api/vat       — VAT stats API
+// /api/rpc       — Solana RPC proxy
+// All are protected by the session check below — listed here for reference
+
 export function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
 
