@@ -179,19 +179,30 @@ async function sendSolTransaction(
 ): Promise<string> {
   if (!window.solana) throw new Error("No Solana wallet found. Install Phantom.");
 
-  const { Connection, PublicKey, Transaction, SystemProgram, LAMPORTS_PER_SOL } =
+  const { PublicKey, Transaction, SystemProgram, LAMPORTS_PER_SOL, Message } =
     await import("@solana/web3.js");
 
-  const rpcUrl = process.env.NEXT_PUBLIC_RPC_URL
-    ?? "https://api.mainnet-beta.solana.com";
+  // ── Fetch blockhash via server-side proxy (keeps RPC key off client) ──
+  const rpcRes = await fetch("/api/rpc", {
+    method:  "POST",
+    headers: { "Content-Type": "application/json" },
+    body:    JSON.stringify({
+      jsonrpc: "2.0",
+      id:      1,
+      method:  "getLatestBlockhash",
+      params:  [{ commitment: "confirmed" }],
+    }),
+  });
 
-  const connection  = new Connection(rpcUrl, "confirmed");
+  if (!rpcRes.ok) throw new Error("Failed to fetch blockhash from RPC proxy");
+  const rpcJson = await rpcRes.json();
+  const blockhash = rpcJson?.result?.value?.blockhash;
+  if (!blockhash) throw new Error("Invalid blockhash response from RPC proxy");
+
   const { publicKey: rawKey } = await window.solana.connect();
-  const fromPubkey  = new PublicKey(rawKey.toBase58());
-  const toPubkey    = new PublicKey(toWallet);
-  const lamports    = Math.round(amountSol * LAMPORTS_PER_SOL);
-
-  const { blockhash } = await connection.getLatestBlockhash("confirmed");
+  const fromPubkey = new PublicKey(rawKey.toBase58());
+  const toPubkey   = new PublicKey(toWallet);
+  const lamports   = Math.round(amountSol * LAMPORTS_PER_SOL);
 
   const tx = new Transaction({
     recentBlockhash: blockhash,
