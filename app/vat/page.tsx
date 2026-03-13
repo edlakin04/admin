@@ -723,7 +723,7 @@ export default function VatPage() {
           )}
 
           {/* Footer */}
-          <div style={{ marginTop: "20px", ...S.sub, textAlign: "center" }}>
+          <div style={{ ...S.sub, marginTop: "20px", textAlign: "center" }}>
             Last updated: {fmtDate(data.generatedAt)} ·
             VAT absorbed from revenue — customers are not charged extra
           </div>
