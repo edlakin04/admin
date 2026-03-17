@@ -6,18 +6,8 @@ import { verifySessionValue }    from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
-// ─── GET /api/batches ─────────────────────────────────────────────────────────
-// Returns all batches for the dashboard:
-//   - The current open batch (live revenue, no affiliate payouts yet)
-//   - All closed/in-progress batches that haven't been completed yet
-//   - Completed batches for the history tab
-//
-// Each batch includes its affiliate payout rows so the UI
-// can show who's paid and who isn't without extra fetches.
-
 export async function GET(req: Request) {
   try {
-    // ── Auth ──────────────────────────────────────────────────────────────
     const cookieStore   = await cookies();
     const sessionValue  = cookieStore.get("admin_session")?.value ?? "";
     const adminPassword = process.env.ADMIN_PASSWORD ?? "";
@@ -28,7 +18,6 @@ export async function GET(req: Request) {
 
     const sb = supabaseAdmin();
 
-    // ── Fetch all batches newest first ────────────────────────────────────
     const { data: batches, error: batchErr } = await sb
       .from("batches")
       .select("*")
@@ -44,7 +33,7 @@ export async function GET(req: Request) {
       return NextResponse.json({ ok: true, batches: [], solGbpPrice: null });
     }
 
-    // ── Fetch all affiliate payout rows for non-open batches ──────────────
+    // ── Fetch affiliate payout rows for non-open batches ──────────────────
     const nonOpenIds = batchList
       .filter((b) => b.status !== "open")
       .map((b) => b.id);
@@ -69,51 +58,49 @@ export async function GET(req: Request) {
     // ── For the open batch: compute live revenue from payments table ───────
     const openBatch = batchList.find((b) => b.status === "open");
     let liveRevenue = {
-      total_revenue_sol:   0,
-      total_affiliate_sol: 0,
-      user_sub_count:      0,
-      dev_sub_count:       0,
+      total_revenue_sol:    0,
+      total_affiliate_sol:  0,
+      user_sub_count:       0,
+      dev_sub_count:        0,
+      bidding_entry_count:  0,
+      bidding_winner_count: 0,
     };
 
     if (openBatch) {
-      // Pull payments in the open batch window
       const { data: livePayments } = await sb
         .from("payments")
         .select("kind, amount_sol")
         .gte("created_at", openBatch.period_start)
-        .lt("created_at", openBatch.period_end);
+        .lt("created_at",  openBatch.period_end);
 
       const { data: liveEarnings } = await sb
         .from("affiliate_earnings")
         .select("amount_sol")
         .gte("created_at", openBatch.period_start)
-        .lt("created_at", openBatch.period_end);
+        .lt("created_at",  openBatch.period_end);
 
       for (const p of livePayments ?? []) {
         liveRevenue.total_revenue_sol += Number(p.amount_sol ?? 0);
-        if (p.kind === "subscription") liveRevenue.user_sub_count++;
-        if (p.kind === "dev_fee")      liveRevenue.dev_sub_count++;
+        if (p.kind === "subscription")      liveRevenue.user_sub_count++;
+        if (p.kind === "dev_fee")           liveRevenue.dev_sub_count++;
+        if (p.kind === "bidding_ad_entry")  liveRevenue.bidding_entry_count++;
+        if (p.kind === "bidding_ad_winner") liveRevenue.bidding_winner_count++;
       }
       for (const e of liveEarnings ?? []) {
         liveRevenue.total_affiliate_sol += Number(e.amount_sol ?? 0);
       }
 
-      // Round
       liveRevenue.total_revenue_sol   = Math.round(liveRevenue.total_revenue_sol   * 1e9) / 1e9;
       liveRevenue.total_affiliate_sol = Math.round(liveRevenue.total_affiliate_sol * 1e9) / 1e9;
     }
 
-    // ── Fetch SOL/GBP price ───────────────────────────────────────────────
     const solGbpPrice = await getSolGbpPrice();
 
-    // ── Build response ────────────────────────────────────────────────────
     const out = batchList.map((b) => {
       const isOpen     = b.status === "open";
       const revSol     = isOpen ? liveRevenue.total_revenue_sol   : Number(b.total_revenue_sol   ?? 0);
       const affSol     = isOpen ? liveRevenue.total_affiliate_sol : Number(b.total_affiliate_sol ?? 0);
       const cashoutSol = Number(b.cashout_sol ?? 0);
-
-      // Your cut = revenue - affiliates (only meaningful once closed)
       const yourCutSol = Math.max(0, Math.round((revSol - affSol) * 1e9) / 1e9);
 
       return {
@@ -127,8 +114,10 @@ export async function GET(req: Request) {
         // Revenue
         total_revenue_sol:    revSol,
         total_revenue_gbp:    solToGbp(revSol, solGbpPrice),
-        user_sub_count:       isOpen ? liveRevenue.user_sub_count : (b.user_sub_count ?? 0),
-        dev_sub_count:        isOpen ? liveRevenue.dev_sub_count  : (b.dev_sub_count  ?? 0),
+        user_sub_count:       isOpen ? liveRevenue.user_sub_count       : (b.user_sub_count       ?? 0),
+        dev_sub_count:        isOpen ? liveRevenue.dev_sub_count        : (b.dev_sub_count        ?? 0),
+        bidding_entry_count:  isOpen ? liveRevenue.bidding_entry_count  : (b.bidding_entry_count  ?? 0),
+        bidding_winner_count: isOpen ? liveRevenue.bidding_winner_count : (b.bidding_winner_count ?? 0),
 
         // Affiliates
         total_affiliate_sol:  affSol,
@@ -138,14 +127,13 @@ export async function GET(req: Request) {
         your_cut_sol:         yourCutSol,
         your_cut_gbp:         solToGbp(yourCutSol, solGbpPrice),
 
-        // Cashout (once done)
+        // Cashout
         cashout_sol:          cashoutSol || null,
         cashout_gbp:          cashoutSol ? solToGbp(cashoutSol, solGbpPrice) : null,
         cashout_tx_signature: b.cashout_tx_signature ?? null,
         cashout_wallet:       b.cashout_wallet ?? null,
         cashout_at:           b.cashout_at ?? null,
 
-        // Affiliate payout rows (empty for open batch)
         affiliate_payouts:    payoutsByBatch[b.id] ?? [],
       };
     });
@@ -154,7 +142,7 @@ export async function GET(req: Request) {
 
   } catch (e: any) {
     return NextResponse.json(
-      { error: "Failed to load batches", details: e?.message ?? String(e) },
+      { error: "Failed to load batches" },
       { status: 500 }
     );
   }
