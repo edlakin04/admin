@@ -82,8 +82,10 @@ export async function GET(req: Request) {
     const totalRevenueSol = paymentList.reduce(
       (sum, p) => sum + Number(p.amount_sol ?? 0), 0
     );
-    const userSubCount = paymentList.filter((p) => p.kind === "subscription").length;
-    const devSubCount  = paymentList.filter((p) => p.kind === "dev_fee").length;
+    const userSubCount           = paymentList.filter((p) => p.kind === "subscription").length;
+    const devSubCount            = paymentList.filter((p) => p.kind === "dev_fee").length;
+    const biddingEntryCount      = paymentList.filter((p) => p.kind === "bidding_ad_entry").length;
+    const biddingWinnerCount     = paymentList.filter((p) => p.kind === "bidding_ad_winner").length;
 
     // ── 4. Pull affiliate earnings for this batch period ─────────────────────
     // affiliate_earnings rows that were created during this batch window
@@ -120,8 +122,10 @@ export async function GET(req: Request) {
         status:             "closed",
         total_revenue_sol:  Math.round(totalRevenueSol  * 1e9) / 1e9,
         total_affiliate_sol: Math.round(totalAffiliateSol * 1e9) / 1e9,
-        user_sub_count:     userSubCount,
-        dev_sub_count:      devSubCount,
+        user_sub_count:          userSubCount,
+        dev_sub_count:           devSubCount,
+        bidding_entry_count:     biddingEntryCount,
+        bidding_winner_count:    biddingWinnerCount,
         closed_at:          new Date().toISOString(),
       })
       .eq("id", openBatch.id);
@@ -166,6 +170,8 @@ export async function GET(req: Request) {
       totalAffiliateSol:   Math.round(totalAffiliateSol  * 1e9) / 1e9,
       userSubCount,
       devSubCount,
+      biddingEntryCount,
+      biddingWinnerCount,
       affiliateCount:      affiliateMap.size,
       paymentCount:        paymentList.length,
     });
