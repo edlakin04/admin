@@ -153,27 +153,19 @@ export async function GET(
     lines.push("  REVENUE");
     lines.push(divider());
     lines.push("");
-    lines.push(line("Total payments:",    `${batch.user_sub_count + batch.dev_sub_count}`));
-    lines.push(line("  User subs:",       `${batch.user_sub_count}`));
-    lines.push(line("  Dev subs:",        `${batch.dev_sub_count}`));
+    const biddingEntryCount  = paymentList.filter((p) => p.kind === "bidding_ad_entry").length;
+    const biddingWinnerCount = paymentList.filter((p) => p.kind === "bidding_ad_winner").length;
+    const totalPayments      = batch.user_sub_count + batch.dev_sub_count + biddingEntryCount + biddingWinnerCount;
+
+    lines.push(line("Total payments:",        `${totalPayments}`));
+    lines.push(line("  User subs:",           `${batch.user_sub_count}`));
+    lines.push(line("  Dev subs:",            `${batch.dev_sub_count}`));
+    lines.push(line("  Bidding ad entries:",  `${biddingEntryCount}`));
+    lines.push(line("  Bidding ad winners:",  `${biddingWinnerCount}`));
     lines.push(line("Total revenue SOL:", fmtSol(revSol)));
     lines.push(line("Total revenue GBP:", fmtGbp(revGbp)));
     lines.push("");
 
-    // Individual payments
-    if (paymentList.length > 0) {
-      lines.push("  Individual payments:");
-      lines.push("");
-      for (const p of paymentList) {
-        const kind     = p.kind === "subscription" ? "User sub" : "Dev sub ";
-        const ref      = p.referrer_wallet ? `  [ref: ${p.referrer_wallet.slice(0,4)}…${p.referrer_wallet.slice(-4)}]` : "";
-        const wallet   = `${p.wallet.slice(0,4)}…${p.wallet.slice(-4)}`;
-        const country  = p.declared_country ? `  ${p.declared_country}` : "";
-        const mismatch = p.country_mismatch  ? "  ⚠ IP mismatch" : "";
-        lines.push(`  ${fmtDate(p.created_at)}  ${kind}  ${wallet}  ${fmtSol(Number(p.amount_sol))}${country}${mismatch}${ref}`);
-      }
-      lines.push("");
-    }
 
     // ── Affiliate payouts ─────────────────────────────────────────────────────
     lines.push(divider());
@@ -184,29 +176,6 @@ export async function GET(
     lines.push(line("Total paid SOL:",   fmtSol(affSol)));
     lines.push(line("Total paid GBP:",   fmtGbp(affGbp)));
     lines.push("");
-
-    if (payoutList.length === 0) {
-      lines.push("  No affiliate payouts for this batch.");
-    } else {
-      for (let i = 0; i < payoutList.length; i++) {
-        const p        = payoutList[i];
-        const amtSol   = Number(p.amount_sol ?? 0);
-        const amtGbp   = solToGbp(amtSol, solGbpPrice);
-        const status   = p.paid ? "PAID" : "UNPAID";
-        const paidAt   = p.paid_at ? fmtDate(p.paid_at) : "—";
-        const txSig    = p.tx_signature
-          ? `${p.tx_signature.slice(0,8)}…${p.tx_signature.slice(-8)}`
-          : "—";
-
-        lines.push(`  ${String(i + 1).padStart(2)}. ${p.referrer_wallet}`);
-        lines.push(`      Amount:    ${fmtSol(amtSol)}  (${fmtGbp(amtGbp)})`);
-        lines.push(`      Payments:  ${p.payment_count}`);
-        lines.push(`      Status:    ${status}`);
-        lines.push(`      Paid at:   ${paidAt}`);
-        lines.push(`      Tx sig:    ${txSig}`);
-        lines.push("");
-      }
-    }
 
     // ── Your cashout ──────────────────────────────────────────────────────────
     lines.push(divider());
