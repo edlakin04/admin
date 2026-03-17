@@ -24,8 +24,10 @@ type Batch = {
   completed_at:         string | null;
   total_revenue_sol:    number;
   total_revenue_gbp:    number | null;
-  user_sub_count:       number;
-  dev_sub_count:        number;
+  user_sub_count:        number;
+  dev_sub_count:         number;
+  bidding_entry_count:   number;
+  bidding_winner_count:  number;
   total_affiliate_sol:  number;
   total_affiliate_gbp:  number | null;
   your_cut_sol:         number;
@@ -188,7 +190,7 @@ function BatchRow({ batch, solGbpPrice }: { batch: Batch; solGbpPrice: number | 
             <div style={S.sub}>
               {fmtSol(batch.total_revenue_sol)} revenue ·{" "}
               {fmtSol(batch.cashout_sol ?? batch.your_cut_sol)} cashed out ·{" "}
-              {batch.user_sub_count + batch.dev_sub_count} payments
+              {batch.user_sub_count + batch.dev_sub_count + batch.bidding_entry_count + batch.bidding_winner_count} payments
             </div>
           </div>
         </div>
@@ -219,8 +221,13 @@ function BatchRow({ batch, solGbpPrice }: { batch: Batch; solGbpPrice: number | 
             </div>
             <div style={S.statBox}>
               <div style={S.label}>Payments</div>
-              <div style={S.val}>{batch.user_sub_count + batch.dev_sub_count}</div>
-              <div style={S.sub}>{batch.user_sub_count} user · {batch.dev_sub_count} dev</div>
+              <div style={S.val}>{batch.user_sub_count + batch.dev_sub_count + batch.bidding_entry_count + batch.bidding_winner_count}</div>
+              <div style={S.sub}>
+                {batch.user_sub_count} user · {batch.dev_sub_count} dev
+                {(batch.bidding_entry_count + batch.bidding_winner_count) > 0
+                  ? ` · ${batch.bidding_entry_count} bid entry · ${batch.bidding_winner_count} bid win`
+                  : null}
+              </div>
             </div>
             <div style={S.statBox}>
               <div style={S.label}>Affiliate payouts</div>
