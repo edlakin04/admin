@@ -181,10 +181,10 @@ type Payment = {
 
 function kindLabel(kind: string) {
   switch (kind) {
-    case "subscription":      return "User sub";
-    case "dev_fee":           return "Dev signup";
-    case "bidding_ad_entry":  return "Bid entry";
-    case "bidding_ad_winner": return "Bid win";
+    case "subscription":      return "Monthly subscription";
+    case "dev_fee":           return "Dev signup fee";
+    case "bidding_ad_entry":  return "Bidding ad entry";
+    case "bidding_ad_winner": return "Bidding ad winner payout";
     default:                  return kind;
   }
 }
@@ -283,14 +283,28 @@ function BatchRow({ batch, solGbpPrice }: { batch: Batch; solGbpPrice: number | 
             </div>
             {batch.bidding_entry_count > 0 && (
               <div style={S.statBox}>
-                <div style={{ ...S.label, color: "#fb923c" }}>Bid entries</div>
-                <div style={S.val}>{batch.bidding_entry_count}</div>
+                <div style={{ ...S.label, color: "#fb923c" }}>Bid entry revenue</div>
+                <div style={S.val}>{batch.bidding_entry_count} entries</div>
+                {payments && (
+                  <div style={S.sub}>
+                    {fmtSol(payments
+                      .filter((p) => p.kind === "bidding_ad_entry")
+                      .reduce((s, p) => s + Number(p.amount_sol), 0))}
+                  </div>
+                )}
               </div>
             )}
             {batch.bidding_winner_count > 0 && (
               <div style={S.statBox}>
-                <div style={{ ...S.label, color: "#22c55e" }}>Bid wins</div>
-                <div style={S.val}>{batch.bidding_winner_count}</div>
+                <div style={{ ...S.label, color: "#22c55e" }}>Bid winner revenue</div>
+                <div style={S.val}>{batch.bidding_winner_count} winners</div>
+                {payments && (
+                  <div style={S.sub}>
+                    {fmtSol(payments
+                      .filter((p) => p.kind === "bidding_ad_winner")
+                      .reduce((s, p) => s + Number(p.amount_sol), 0))}
+                  </div>
+                )}
               </div>
             )}
 
@@ -332,7 +346,7 @@ function BatchRow({ batch, solGbpPrice }: { batch: Batch; solGbpPrice: number | 
                   <tr>
                     <th style={S.th}>Time</th>
                     <th style={S.th}>Wallet</th>
-                    <th style={S.th}>Type</th>
+                    <th style={S.th}>Payment for</th>
                     <th style={S.th}>Amount</th>
                     <th style={S.th}>Referrer</th>
                     <th style={S.th}>Tx</th>
