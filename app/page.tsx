@@ -388,18 +388,16 @@ function BatchCard({
               <div style={S.val}>{batch.dev_sub_count}</div>
               <div style={S.sub}>0.5 SOL / 3 SOL signup</div>
             </div>
-            {batch.bidding_entry_count > 0 && (
-              <div style={S.statBox()}>
-                <div style={{ ...S.label, color: "#fb923c" }}>Bid entries</div>
-                <div style={S.val}>{batch.bidding_entry_count}</div>
-              </div>
-            )}
-            {batch.bidding_winner_count > 0 && (
-              <div style={S.statBox()}>
-                <div style={{ ...S.label, color: "#22c55e" }}>Bid wins</div>
-                <div style={S.val}>{batch.bidding_winner_count}</div>
-              </div>
-            )}
+            <div style={S.statBox()}>
+              <div style={{ ...S.label, color: "#fb923c" }}>Bid entry revenue</div>
+              <div style={S.val}>{batch.bidding_entry_count}</div>
+              <div style={S.sub}>entries this batch</div>
+            </div>
+            <div style={S.statBox()}>
+              <div style={{ ...S.label, color: "#22c55e" }}>Bid winner revenue</div>
+              <div style={S.val}>{batch.bidding_winner_count}</div>
+              <div style={S.sub}>winners this batch</div>
+            </div>
             <div style={S.statBox()}>
               <div style={S.label}>Affiliates owed</div>
               <div style={S.val}>{fmtSol(batch.total_affiliate_sol)}</div>

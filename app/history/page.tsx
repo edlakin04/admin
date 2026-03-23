@@ -281,32 +281,28 @@ function BatchRow({ batch, solGbpPrice }: { batch: Batch; solGbpPrice: number | 
               <div style={S.val}>{batch.dev_sub_count}</div>
               <div style={S.sub}>0.5 SOL / 3 SOL signup</div>
             </div>
-            {batch.bidding_entry_count > 0 && (
-              <div style={S.statBox}>
-                <div style={{ ...S.label, color: "#fb923c" }}>Bid entry revenue</div>
-                <div style={S.val}>{batch.bidding_entry_count} entries</div>
-                {payments && (
-                  <div style={S.sub}>
-                    {fmtSol(payments
-                      .filter((p) => p.kind === "bidding_ad_entry")
-                      .reduce((s, p) => s + Number(p.amount_sol), 0))}
-                  </div>
-                )}
-              </div>
-            )}
-            {batch.bidding_winner_count > 0 && (
-              <div style={S.statBox}>
-                <div style={{ ...S.label, color: "#22c55e" }}>Bid winner revenue</div>
-                <div style={S.val}>{batch.bidding_winner_count} winners</div>
-                {payments && (
-                  <div style={S.sub}>
-                    {fmtSol(payments
-                      .filter((p) => p.kind === "bidding_ad_winner")
-                      .reduce((s, p) => s + Number(p.amount_sol), 0))}
-                  </div>
-                )}
-              </div>
-            )}
+            <div style={S.statBox}>
+              <div style={{ ...S.label, color: "#fb923c" }}>Bid entry revenue</div>
+              <div style={S.val}>{batch.bidding_entry_count} entries</div>
+              {payments && (
+                <div style={S.sub}>
+                  {fmtSol(payments
+                    .filter((p) => p.kind === "bidding_ad_entry")
+                    .reduce((s: number, p) => s + Number(p.amount_sol), 0))}
+                </div>
+              )}
+            </div>
+            <div style={S.statBox}>
+              <div style={{ ...S.label, color: "#22c55e" }}>Bid winner revenue</div>
+              <div style={S.val}>{batch.bidding_winner_count} winners</div>
+              {payments && (
+                <div style={S.sub}>
+                  {fmtSol(payments
+                    .filter((p) => p.kind === "bidding_ad_winner")
+                    .reduce((s: number, p) => s + Number(p.amount_sol), 0))}
+                </div>
+              )}
+            </div>
 
             <div style={S.statBox}>
               <div style={S.label}>Affiliate payouts</div>
