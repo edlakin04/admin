@@ -272,15 +272,28 @@ function BatchRow({ batch, solGbpPrice }: { batch: Batch; solGbpPrice: number | 
               <div style={S.sub}>{fmtGbp(batch.total_revenue_gbp)}</div>
             </div>
             <div style={S.statBox}>
-              <div style={S.label}>Payments</div>
-              <div style={S.val}>{batch.user_sub_count + batch.dev_sub_count + batch.bidding_entry_count + batch.bidding_winner_count}</div>
-              <div style={S.sub}>
-                {batch.user_sub_count} user · {batch.dev_sub_count} dev
-                {(batch.bidding_entry_count + batch.bidding_winner_count) > 0
-                  ? ` · ${batch.bidding_entry_count} bid entry · ${batch.bidding_winner_count} bid win`
-                  : null}
-              </div>
+              <div style={{ ...S.label, color: "#38bdf8" }}>User subs</div>
+              <div style={S.val}>{batch.user_sub_count}</div>
+              <div style={S.sub}>0.5 SOL each</div>
             </div>
+            <div style={S.statBox}>
+              <div style={{ ...S.label, color: "#a78bfa" }}>Dev subs</div>
+              <div style={S.val}>{batch.dev_sub_count}</div>
+              <div style={S.sub}>0.5 SOL each</div>
+            </div>
+            {batch.bidding_entry_count > 0 && (
+              <div style={S.statBox}>
+                <div style={{ ...S.label, color: "#fb923c" }}>Bid entries</div>
+                <div style={S.val}>{batch.bidding_entry_count}</div>
+              </div>
+            )}
+            {batch.bidding_winner_count > 0 && (
+              <div style={S.statBox}>
+                <div style={{ ...S.label, color: "#22c55e" }}>Bid wins</div>
+                <div style={S.val}>{batch.bidding_winner_count}</div>
+              </div>
+            )}
+
             <div style={S.statBox}>
               <div style={S.label}>Affiliate payouts</div>
               <div style={S.val}>{fmtSol(batch.total_affiliate_sol)}</div>
