@@ -240,6 +240,7 @@ function BatchCard({
   const isClosed        = batch.status === "closed";
   const isAffsPaid      = batch.status === "affiliates_paid";
   const isComplete      = batch.status === "complete";
+  const isZeroRevenue   = batch.total_revenue_sol === 0;
   const unpaidPayouts   = batch.affiliate_payouts.filter((p) => !p.paid);
   const allAffsPaid     = unpaidPayouts.length === 0 && batch.affiliate_payouts.length > 0;
 
@@ -313,6 +314,26 @@ function BatchCard({
 
   async function downloadExport() {
     window.open(`/api/batches/${batch.id}/export`, "_blank");
+  }
+
+  async function markCompleteNoRevenue() {
+    setCashingOut(true);
+    setMsg(null);
+    try {
+      const res  = await fetch(`/api/batches/${batch.id}/cashout`, {
+        method:  "POST",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify({}),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json?.error ?? "Failed to mark complete");
+      setMsg({ text: "Batch marked as complete (no revenue) ✓", ok: true });
+      onRefresh();
+    } catch (e: any) {
+      setMsg({ text: e?.message ?? "Failed", ok: false });
+    } finally {
+      setCashingOut(false);
+    }
   }
 
   const periodLabel = `${fmtDateShort(batch.period_start)} — ${fmtDateShort(batch.period_end)}`;
@@ -468,12 +489,33 @@ function BatchCard({
 
               {isComplete ? (
                 <div>
-                  <div style={{ color: "#22c55e", fontWeight: 600, marginBottom: "6px" }}>
-                    Cashed out {fmtSol(batch.cashout_sol)} ({fmtGbp(batch.cashout_gbp)}) ✓
+                  {batch.cashout_sol ? (
+                    <div>
+                      <div style={{ color: "#22c55e", fontWeight: 600, marginBottom: "6px" }}>
+                        Cashed out {fmtSol(batch.cashout_sol)} ({fmtGbp(batch.cashout_gbp)}) ✓
+                      </div>
+                      <div style={{ fontSize: "12px", color: "#71717a" }}>
+                        Sent to {shortWallet(batch.cashout_wallet ?? "")} · {fmtDate(batch.cashout_at)}
+                      </div>
+                    </div>
+                  ) : (
+                    <div style={{ color: "#52525b", fontSize: "13px" }}>
+                      No revenue — batch closed ✓
+                    </div>
+                  )}
+                </div>
+              ) : isZeroRevenue && (isClosed || isAffsPaid) ? (
+                <div>
+                  <div style={{ marginBottom: "10px", fontSize: "13px", color: "#71717a" }}>
+                    No payments in this batch — mark it complete to save to history.
                   </div>
-                  <div style={{ fontSize: "12px", color: "#71717a" }}>
-                    Sent to {shortWallet(batch.cashout_wallet ?? "")} · {fmtDate(batch.cashout_at)}
-                  </div>
+                  <button
+                    style={{ ...S.btn("secondary"), opacity: cashingOut ? 0.6 : 1 }}
+                    disabled={cashingOut}
+                    onClick={markCompleteNoRevenue}
+                  >
+                    {cashingOut ? "Saving…" : "Mark as complete (no revenue)"}
+                  </button>
                 </div>
               ) : isAffsPaid ? (
                 <div>
@@ -486,10 +528,7 @@ function BatchCard({
                     </span>
                   </div>
                   <button
-                    style={{
-                      ...S.btn("primary"),
-                      opacity: cashingOut ? 0.6 : 1,
-                    }}
+                    style={{ ...S.btn("primary"), opacity: cashingOut ? 0.6 : 1 }}
                     disabled={cashingOut || !!payingId}
                     onClick={cashOut}
                   >

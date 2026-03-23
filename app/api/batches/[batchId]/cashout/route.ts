@@ -51,14 +51,43 @@ export async function POST(
     if (batchErr) return NextResponse.json({ error: batchErr.message }, { status: 500 });
     if (!batch)   return NextResponse.json({ error: "Batch not found" },  { status: 404 });
 
+    if (batch.status === "complete") {
+      return NextResponse.json({ error: "This batch has already been completed" }, { status: 400 });
+    }
+
+    // ── 2. Compute expected cashout amount ───────────────────────────────────
+    const totalRevenueSol   = Number(batch.total_revenue_sol   ?? 0);
+    const totalAffiliateSol = Number(batch.total_affiliate_sol ?? 0);
+    const expectedCashoutSol = Math.max(
+      0,
+      Math.round((totalRevenueSol - totalAffiliateSol) * 1e9) / 1e9
+    );
+
+    // ── Zero-revenue fast path ───────────────────────────────────────────────
+    // If the batch had no payments and no affiliates, mark it complete immediately
+    // without requiring a cashout tx. This captures empty days in history.
+    if (totalRevenueSol === 0 && expectedCashoutSol === 0) {
+      if (batch.status !== "closed" && batch.status !== "affiliates_paid") {
+        return NextResponse.json(
+          { error: `Batch status is '${batch.status}' — cannot complete` },
+          { status: 400 }
+        );
+      }
+      const now = new Date().toISOString();
+      await sb.from("batches").update({
+        status:       "complete",
+        completed_at: now,
+      }).eq("id", batchId);
+
+      return NextResponse.json({ ok: true, batchId, zeroRevenue: true, completedAt: now });
+    }
+
     // Must be affiliates_paid — all affiliates must be done first
     if (batch.status !== "affiliates_paid") {
       return NextResponse.json(
         {
           error: batch.status === "closed"
             ? "All affiliate payouts must be completed before you can cash out"
-            : batch.status === "complete"
-            ? "This batch has already been cashed out"
             : `Batch status is '${batch.status}' — cannot cashout`,
         },
         { status: 400 }
@@ -70,21 +99,6 @@ export async function POST(
       return NextResponse.json(
         { error: "Cashout already recorded for this batch" },
         { status: 409 }
-      );
-    }
-
-    // ── 2. Compute expected cashout amount ───────────────────────────────────
-    const totalRevenueSol   = Number(batch.total_revenue_sol   ?? 0);
-    const totalAffiliateSol = Number(batch.total_affiliate_sol ?? 0);
-    const expectedCashoutSol = Math.max(
-      0,
-      Math.round((totalRevenueSol - totalAffiliateSol) * 1e9) / 1e9
-    );
-
-    if (expectedCashoutSol <= 0) {
-      return NextResponse.json(
-        { error: "No cashout amount available for this batch" },
-        { status: 400 }
       );
     }
 
