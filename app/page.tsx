@@ -340,14 +340,12 @@ function BatchCard({
 
   return (
     <div style={S.card}>
-      {/* Header row — click to expand/collapse */}
-      <div style={S.cardHeader} onClick={() => !isOpen && setOpen((o) => !o)}>
+      {/* Header row — always clickable to expand/collapse */}
+      <div style={{ ...S.cardHeader, cursor: "pointer" }} onClick={() => setOpen((o) => !o)}>
         <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-          {!isOpen && (
-            <span style={{ color: "#52525b", fontSize: "13px" }}>
-              {open ? "▾" : "▸"}
-            </span>
-          )}
+          <span style={{ color: "#52525b", fontSize: "13px" }}>
+            {open ? "▾" : "▸"}
+          </span>
           <div>
             <div style={{ fontWeight: 700, fontSize: "15px" }}>
               {isOpen ? "Today — live" : periodLabel}
@@ -370,7 +368,7 @@ function BatchCard({
       </div>
 
       {/* Body — only shown when expanded */}
-      {(open || isOpen) && (
+      {open && (
         <div style={{ marginTop: "16px" }}>
 
           {/* Stat grid */}
@@ -381,15 +379,27 @@ function BatchCard({
               <div style={S.sub}>{fmtGbp(batch.total_revenue_gbp)}</div>
             </div>
             <div style={S.statBox()}>
-              <div style={S.label}>Payments</div>
-              <div style={S.val}>{batch.user_sub_count + batch.dev_sub_count + batch.bidding_entry_count + batch.bidding_winner_count}</div>
-              <div style={S.sub}>
-                {batch.user_sub_count} user · {batch.dev_sub_count} dev
-                {(batch.bidding_entry_count + batch.bidding_winner_count) > 0
-                  ? ` · ${batch.bidding_entry_count} bid entry · ${batch.bidding_winner_count} bid win`
-                  : null}
-              </div>
+              <div style={{ ...S.label, color: "#38bdf8" }}>User subs</div>
+              <div style={S.val}>{batch.user_sub_count}</div>
+              <div style={S.sub}>0.5 SOL each</div>
             </div>
+            <div style={S.statBox()}>
+              <div style={{ ...S.label, color: "#a78bfa" }}>Dev fee</div>
+              <div style={S.val}>{batch.dev_sub_count}</div>
+              <div style={S.sub}>0.5 SOL / 3 SOL signup</div>
+            </div>
+            {batch.bidding_entry_count > 0 && (
+              <div style={S.statBox()}>
+                <div style={{ ...S.label, color: "#fb923c" }}>Bid entries</div>
+                <div style={S.val}>{batch.bidding_entry_count}</div>
+              </div>
+            )}
+            {batch.bidding_winner_count > 0 && (
+              <div style={S.statBox()}>
+                <div style={{ ...S.label, color: "#22c55e" }}>Bid wins</div>
+                <div style={S.val}>{batch.bidding_winner_count}</div>
+              </div>
+            )}
             <div style={S.statBox()}>
               <div style={S.label}>Affiliates owed</div>
               <div style={S.val}>{fmtSol(batch.total_affiliate_sol)}</div>
@@ -715,43 +725,15 @@ export default function AdminDashboard() {
           </div>
         )}
 
-        {/* Completed batches summary */}
+        {/* Link to history */}
         {completeBatches.length > 0 && (
-          <div style={{ marginTop: "32px" }}>
-            <div style={{ ...S.label, marginBottom: "12px" }}>
-              Completed — {completeBatches.length} batch{completeBatches.length !== 1 ? "es" : ""}
-            </div>
-            {completeBatches.slice(0, 5).map((b) => (
-              <div key={b.id} style={{
-                ...S.card,
-                display:        "flex",
-                alignItems:     "center",
-                justifyContent: "space-between",
-                padding:        "14px 18px",
-              }}>
-                <div>
-                  <div style={{ fontWeight: 600, fontSize: "14px" }}>
-                    {fmtDateShort(b.period_start)}
-                  </div>
-                  <div style={S.sub}>
-                    {fmtSol(b.total_revenue_sol)} revenue · {fmtSol(b.cashout_sol ?? b.your_cut_sol)} cashed out
-                  </div>
-                </div>
-                <div style={{ display: "flex", gap: "8px" }}>
-                  <button
-                    style={S.btn("ghost")}
-                    onClick={() => window.open(`/api/batches/${b.id}/export`, "_blank")}
-                  >
-                    Download
-                  </button>
-                  <a href="/history" style={S.btn("secondary")}>
-                    All history →
-                  </a>
-                </div>
-              </div>
-            ))}
+          <div style={{ marginTop: "24px", textAlign: "center" }}>
+            <a href="/history" style={S.btn("secondary")}>
+              View all {completeBatches.length} completed batch{completeBatches.length !== 1 ? "es" : ""} in history →
+            </a>
           </div>
         )}
+
 
         {!loading && batches.length === 0 && (
           <div style={{

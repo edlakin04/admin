@@ -277,9 +277,9 @@ function BatchRow({ batch, solGbpPrice }: { batch: Batch; solGbpPrice: number | 
               <div style={S.sub}>0.5 SOL each</div>
             </div>
             <div style={S.statBox}>
-              <div style={{ ...S.label, color: "#a78bfa" }}>Dev subs</div>
+              <div style={{ ...S.label, color: "#a78bfa" }}>Dev fee</div>
               <div style={S.val}>{batch.dev_sub_count}</div>
-              <div style={S.sub}>0.5 SOL each</div>
+              <div style={S.sub}>0.5 SOL / 3 SOL signup</div>
             </div>
             {batch.bidding_entry_count > 0 && (
               <div style={S.statBox}>
