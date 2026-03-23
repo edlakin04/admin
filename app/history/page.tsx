@@ -166,19 +166,71 @@ const S = {
   },
 };
 
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+type Payment = {
+  wallet:          string;
+  kind:            string;
+  amount_sol:      number;
+  referrer_wallet: string | null;
+  signature:       string;
+  created_at:      string;
+};
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function kindLabel(kind: string) {
+  switch (kind) {
+    case "subscription":      return "User sub";
+    case "dev_fee":           return "Dev signup";
+    case "bidding_ad_entry":  return "Bid entry";
+    case "bidding_ad_winner": return "Bid win";
+    default:                  return kind;
+  }
+}
+
+function kindColor(kind: string) {
+  switch (kind) {
+    case "subscription":      return "#38bdf8";
+    case "dev_fee":           return "#a78bfa";
+    case "bidding_ad_entry":  return "#fb923c";
+    case "bidding_ad_winner": return "#22c55e";
+    default:                  return "#71717a";
+  }
+}
+
 // ─── Batch detail row ─────────────────────────────────────────────────────────
 
 function BatchRow({ batch, solGbpPrice }: { batch: Batch; solGbpPrice: number | null }) {
-  const [open, setOpen] = useState(false);
+  const [open,         setOpen]         = useState(false);
+  const [payments,     setPayments]     = useState<Payment[] | null>(null);
+  const [loadingPay,   setLoadingPay]   = useState(false);
 
   const isComplete  = batch.status === "complete";
   const statusColor = isComplete ? "#22c55e" : "#f59e0b";
   const statusLabel = isComplete ? "Complete" : batch.status.replace("_", " ");
 
+  async function toggleOpen() {
+    const nowOpen = !open;
+    setOpen(nowOpen);
+    if (nowOpen && payments === null) {
+      setLoadingPay(true);
+      try {
+        const res  = await fetch(`/api/batches/${batch.id}/payments`, { cache: "no-store" });
+        const json = await res.json();
+        setPayments(res.ok ? (json.payments ?? []) : []);
+      } catch {
+        setPayments([]);
+      } finally {
+        setLoadingPay(false);
+      }
+    }
+  }
+
   return (
     <div style={S.card}>
       {/* Collapsed header */}
-      <div style={S.cardHeader} onClick={() => setOpen((o) => !o)}>
+      <div style={S.cardHeader} onClick={toggleOpen}>
         <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
           <span style={{ color: "#52525b", fontSize: "13px" }}>
             {open ? "▾" : "▸"}
@@ -243,6 +295,85 @@ function BatchRow({ batch, solGbpPrice }: { batch: Batch; solGbpPrice: number | 
                 {fmtGbp(batch.cashout_gbp ?? batch.your_cut_gbp)}
               </div>
             </div>
+          </div>
+
+          {/* ── Per-wallet payment log ─────────────────────────────── */}
+          <div style={{ marginTop: "24px" }}>
+            <div style={{ ...S.label, marginBottom: "10px" }}>
+              Individual payments — full wallet log
+            </div>
+
+            {loadingPay && (
+              <div style={{ color: "#52525b", fontSize: "13px" }}>Loading…</div>
+            )}
+
+            {!loadingPay && payments !== null && payments.length === 0 && (
+              <div style={{ color: "#52525b", fontSize: "13px" }}>
+                No payments recorded in this batch.
+              </div>
+            )}
+
+            {!loadingPay && payments && payments.length > 0 && (
+              <table style={S.table}>
+                <thead>
+                  <tr>
+                    <th style={S.th}>Time</th>
+                    <th style={S.th}>Wallet</th>
+                    <th style={S.th}>Type</th>
+                    <th style={S.th}>Amount</th>
+                    <th style={S.th}>Referrer</th>
+                    <th style={S.th}>Tx</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {payments.map((p) => (
+                    <tr key={p.signature}>
+                      <td style={{ ...S.td, color: "#71717a", whiteSpace: "nowrap" as const }}>
+                        {fmtDate(p.created_at)}
+                      </td>
+                      <td style={S.td}>
+                        <span style={{ fontFamily: "monospace", fontSize: "12px" }}>
+                          {shortWallet(p.wallet)}
+                        </span>
+                      </td>
+                      <td style={S.td}>
+                        <span style={{
+                          display:      "inline-block",
+                          padding:      "2px 7px",
+                          borderRadius: "999px",
+                          fontSize:     "11px",
+                          fontWeight:   600,
+                          background:   `${kindColor(p.kind)}22`,
+                          color:        kindColor(p.kind),
+                        }}>
+                          {kindLabel(p.kind)}
+                        </span>
+                      </td>
+                      <td style={S.td}>
+                        <div>{fmtSol(Number(p.amount_sol))}</div>
+                        {solGbpPrice && (
+                          <div style={S.sub}>
+                            {fmtGbp(Math.round(Number(p.amount_sol) * solGbpPrice * 100) / 100)}
+                          </div>
+                        )}
+                      </td>
+                      <td style={S.td}>
+                        {p.referrer_wallet ? (
+                          <span style={{ fontFamily: "monospace", fontSize: "12px", color: "#71717a" }}>
+                            {shortWallet(p.referrer_wallet)}
+                          </span>
+                        ) : (
+                          <span style={{ color: "#3f3f46", fontSize: "12px" }}>—</span>
+                        )}
+                      </td>
+                      <td style={{ ...S.td, fontFamily: "monospace", fontSize: "11px", color: "#52525b" }}>
+                        {shortTx(p.signature)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
           </div>
 
           {/* Cashout details */}
@@ -344,6 +475,7 @@ function BatchRow({ batch, solGbpPrice }: { batch: Batch; solGbpPrice: number | 
 }
 
 // ─── Main page ────────────────────────────────────────────────────────────────
+
 
 export default function HistoryPage() {
   const router = useRouter();
