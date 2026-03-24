@@ -38,17 +38,14 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Server misconfigured" }, { status: 500 });
     }
 
-    // Constant-time comparison to prevent timing attacks
-    if (password.length !== adminPassword.length) {
-      return NextResponse.json({ error: "Invalid password" }, { status: 401 });
-    }
+    // Constant-time comparison using timingSafeEqual on fixed-length digests
+    // Hashing both values first means the buffers are always 32 bytes regardless
+    // of password length — eliminates any length-based timing leak entirely.
+    const { timingSafeEqual, createHash } = await import("crypto");
+    const expected = createHash("sha256").update(adminPassword).digest();
+    const received = createHash("sha256").update(password).digest();
 
-    let diff = 0;
-    for (let i = 0; i < adminPassword.length; i++) {
-      diff |= password.charCodeAt(i) ^ adminPassword.charCodeAt(i);
-    }
-
-    if (diff !== 0) {
+    if (!timingSafeEqual(expected, received)) {
       return NextResponse.json({ error: "Invalid password" }, { status: 401 });
     }
 
