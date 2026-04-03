@@ -40,6 +40,18 @@ type Batch = {
   affiliate_payouts:    AffiliatePayout[];
 };
 
+type MonthGroup = {
+  key:        string; // "2026-03"
+  year:       number;
+  month:      number;
+  label:      string; // "March 2026"
+  batches:    Batch[];
+  totalRevSol: number;
+  totalAffSol: number;
+  totalCashSol: number;
+  totalPayments: number;
+};
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function fmtDate(iso: string | null) {
@@ -81,6 +93,42 @@ function shortTx(tx: string | null) {
   return `${tx.slice(0, 8)}…${tx.slice(-8)}`;
 }
 
+function groupByMonth(batches: Batch[]): MonthGroup[] {
+  const map = new Map<string, MonthGroup>();
+
+  for (const b of batches) {
+    const d     = new Date(b.period_start);
+    const year  = d.toLocaleDateString("en-GB", { timeZone: "Europe/London", year: "numeric" });
+    const month = d.toLocaleDateString("en-GB", { timeZone: "Europe/London", month: "2-digit" });
+    const fullYear = parseInt(year, 10);
+    const fullMonth = parseInt(month, 10);
+    const key   = `${fullYear}-${String(fullMonth).padStart(2, "0")}`;
+    const label = d.toLocaleDateString("en-GB", {
+      timeZone: "Europe/London",
+      month: "long", year: "numeric",
+    });
+
+    if (!map.has(key)) {
+      map.set(key, {
+        key, year: fullYear, month: fullMonth, label,
+        batches: [],
+        totalRevSol: 0, totalAffSol: 0, totalCashSol: 0, totalPayments: 0,
+      });
+    }
+
+    const grp = map.get(key)!;
+    grp.batches.push(b);
+    grp.totalRevSol   += b.total_revenue_sol;
+    grp.totalAffSol   += b.total_affiliate_sol;
+    grp.totalCashSol  += b.cashout_sol ?? b.your_cut_sol;
+    grp.totalPayments += b.user_sub_count + b.dev_sub_count
+                       + b.bidding_entry_count + b.bidding_winner_count;
+  }
+
+  // Sort newest month first
+  return Array.from(map.values()).sort((a, b) => b.key.localeCompare(a.key));
+}
+
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
 const S = {
@@ -103,6 +151,26 @@ const S = {
   cardBody: {
     padding:    "0 20px 20px",
     borderTop:  "1px solid #1c1c1e",
+  },
+  monthCard: {
+    background:   "#0f0f11",
+    border:       "1px solid #27272a",
+    borderRadius: "16px",
+    marginBottom: "14px",
+    overflow:     "hidden",
+  } as React.CSSProperties,
+  monthHeader: {
+    display:        "flex",
+    alignItems:     "center",
+    justifyContent: "space-between",
+    gap:            "12px",
+    padding:        "20px 22px",
+    cursor:         "pointer",
+    userSelect:     "none" as const,
+  },
+  monthBody: {
+    padding:     "0 16px 16px",
+    borderTop:   "1px solid #1c1c1e",
   },
   label: {
     fontSize:      "11px",
@@ -202,18 +270,18 @@ function kindColor(kind: string) {
 // ─── Batch detail row ─────────────────────────────────────────────────────────
 
 function BatchRow({ batch, solGbpPrice }: { batch: Batch; solGbpPrice: number | null }) {
-  const [open,         setOpen]         = useState(false);
-  const [payments,     setPayments]     = useState<Payment[] | null>(null);
-  const [loadingPay,   setLoadingPay]   = useState(false);
+  const [open,       setOpen]       = useState(false);
+  const [payments,   setPayments]   = useState<Payment[] | null>(null);
+  const [loadingPay, setLoadingPay] = useState(false);
 
-  const isComplete  = batch.status === "complete";
-  const statusColor = isComplete ? "#22c55e" : "#f59e0b";
-  const statusLabel = isComplete ? "Complete" : batch.status.replace("_", " ");
+  const isZeroRev   = batch.total_revenue_sol === 0;
+  const statusColor = "#22c55e";
+  const statusLabel = "Complete";
 
   async function toggleOpen() {
     const nowOpen = !open;
     setOpen(nowOpen);
-    if (nowOpen && payments === null) {
+    if (nowOpen && payments === null && !isZeroRev) {
       setLoadingPay(true);
       try {
         const res  = await fetch(`/api/batches/${batch.id}/payments`, { cache: "no-store" });
@@ -228,7 +296,7 @@ function BatchRow({ batch, solGbpPrice }: { batch: Batch; solGbpPrice: number | 
   }
 
   return (
-    <div style={S.card}>
+    <div style={{ ...S.card, marginBottom: "8px" }}>
       {/* Collapsed header */}
       <div style={S.cardHeader} onClick={toggleOpen}>
         <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
@@ -236,18 +304,20 @@ function BatchRow({ batch, solGbpPrice }: { batch: Batch; solGbpPrice: number | 
             {open ? "▾" : "▸"}
           </span>
           <div>
-            <div style={{ fontWeight: 700, fontSize: "15px" }}>
+            <div style={{ fontWeight: 700, fontSize: "14px" }}>
               {fmtDateShort(batch.period_start)}
             </div>
             <div style={S.sub}>
-              {fmtSol(batch.total_revenue_sol)} revenue ·{" "}
-              {fmtSol(batch.cashout_sol ?? batch.your_cut_sol)} cashed out ·{" "}
-              {batch.user_sub_count + batch.dev_sub_count + batch.bidding_entry_count + batch.bidding_winner_count} payments
+              {isZeroRev
+                ? "No revenue"
+                : `${fmtSol(batch.total_revenue_sol)} revenue · ${batch.user_sub_count + batch.dev_sub_count + batch.bidding_entry_count + batch.bidding_winner_count} payments`}
             </div>
           </div>
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-          <span style={S.tag(statusColor)}>{statusLabel}</span>
+        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+          <span style={S.tag(isZeroRev ? "#52525b" : statusColor)}>
+            {isZeroRev ? "No revenue" : statusLabel}
+          </span>
           <button
             style={S.btn("ghost")}
             onClick={(e) => {
@@ -264,226 +334,194 @@ function BatchRow({ batch, solGbpPrice }: { batch: Batch; solGbpPrice: number | 
       {open && (
         <div style={S.cardBody}>
 
-          {/* Stat grid */}
-          <div style={S.statGrid}>
-            <div style={S.statBox}>
-              <div style={S.label}>Revenue</div>
-              <div style={S.val}>{fmtSol(batch.total_revenue_sol)}</div>
-              <div style={S.sub}>{fmtGbp(batch.total_revenue_gbp)}</div>
+          {isZeroRev ? (
+            <div style={{ padding: "16px 0", color: "#52525b", fontSize: "13px" }}>
+              No payments recorded on this day.
             </div>
-            <div style={S.statBox}>
-              <div style={{ ...S.label, color: "#38bdf8" }}>User subs</div>
-              <div style={S.val}>{batch.user_sub_count}</div>
-              <div style={S.sub}>0.5 SOL each</div>
-            </div>
-            <div style={S.statBox}>
-              <div style={{ ...S.label, color: "#a78bfa" }}>Dev fee</div>
-              <div style={S.val}>{batch.dev_sub_count}</div>
-              <div style={S.sub}>0.5 SOL / 3 SOL signup</div>
-            </div>
-            <div style={S.statBox}>
-              <div style={{ ...S.label, color: "#fb923c" }}>Bid entry revenue</div>
-              <div style={S.val}>{batch.bidding_entry_count} entries</div>
-              {payments && (
-                <div style={S.sub}>
-                  {fmtSol(payments
-                    .filter((p) => p.kind === "bidding_ad_entry")
-                    .reduce((s: number, p) => s + Number(p.amount_sol), 0))}
+          ) : (
+            <>
+              {/* Stat grid */}
+              <div style={S.statGrid}>
+                <div style={S.statBox}>
+                  <div style={S.label}>Revenue</div>
+                  <div style={S.val}>{fmtSol(batch.total_revenue_sol)}</div>
+                  <div style={S.sub}>{fmtGbp(batch.total_revenue_gbp)}</div>
+                </div>
+                <div style={S.statBox}>
+                  <div style={{ ...S.label, color: "#38bdf8" }}>User subs</div>
+                  <div style={S.val}>{batch.user_sub_count}</div>
+                </div>
+                <div style={S.statBox}>
+                  <div style={{ ...S.label, color: "#a78bfa" }}>Dev fee</div>
+                  <div style={S.val}>{batch.dev_sub_count}</div>
+                </div>
+                <div style={S.statBox}>
+                  <div style={{ ...S.label, color: "#fb923c" }}>Bid entries</div>
+                  <div style={S.val}>{batch.bidding_entry_count}</div>
+                </div>
+                <div style={S.statBox}>
+                  <div style={{ ...S.label, color: "#22c55e" }}>Bid winners</div>
+                  <div style={S.val}>{batch.bidding_winner_count}</div>
+                </div>
+                <div style={S.statBox}>
+                  <div style={S.label}>Affiliate payouts</div>
+                  <div style={S.val}>{fmtSol(batch.total_affiliate_sol)}</div>
+                  <div style={S.sub}>{fmtGbp(batch.total_affiliate_gbp)}</div>
+                </div>
+                <div style={S.statBox}>
+                  <div style={S.label}>Your cashout</div>
+                  <div style={{ ...S.val, color: "#22c55e" }}>
+                    {fmtSol(batch.cashout_sol ?? batch.your_cut_sol)}
+                  </div>
+                  <div style={S.sub}>
+                    {fmtGbp(batch.cashout_gbp ?? batch.your_cut_gbp)}
+                  </div>
+                </div>
+              </div>
+
+              {/* Per-wallet payment log */}
+              <div style={{ marginTop: "24px" }}>
+                <div style={{ ...S.label, marginBottom: "10px" }}>
+                  Individual payments
+                </div>
+
+                {loadingPay && (
+                  <div style={{ color: "#52525b", fontSize: "13px" }}>Loading…</div>
+                )}
+
+                {!loadingPay && payments !== null && payments.length === 0 && (
+                  <div style={{ color: "#52525b", fontSize: "13px" }}>
+                    No payments recorded in this batch.
+                  </div>
+                )}
+
+                {!loadingPay && payments && payments.length > 0 && (
+                  <table style={S.table}>
+                    <thead>
+                      <tr>
+                        <th style={S.th}>Time</th>
+                        <th style={S.th}>Wallet</th>
+                        <th style={S.th}>Payment for</th>
+                        <th style={S.th}>Amount</th>
+                        <th style={S.th}>Referrer</th>
+                        <th style={S.th}>Tx</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {payments.map((p) => (
+                        <tr key={p.signature}>
+                          <td style={{ ...S.td, color: "#71717a", whiteSpace: "nowrap" as const }}>
+                            {fmtDate(p.created_at)}
+                          </td>
+                          <td style={S.td}>
+                            <span style={{ fontFamily: "monospace", fontSize: "12px" }}>
+                              {shortWallet(p.wallet)}
+                            </span>
+                          </td>
+                          <td style={S.td}>
+                            <span style={{
+                              display: "inline-block", padding: "2px 7px",
+                              borderRadius: "999px", fontSize: "11px", fontWeight: 600,
+                              background: `${kindColor(p.kind)}22`, color: kindColor(p.kind),
+                            }}>
+                              {kindLabel(p.kind)}
+                            </span>
+                          </td>
+                          <td style={S.td}>
+                            <div>{fmtSol(Number(p.amount_sol))}</div>
+                          </td>
+                          <td style={S.td}>
+                            {p.referrer_wallet ? (
+                              <span style={{ fontFamily: "monospace", fontSize: "12px", color: "#71717a" }}>
+                                {shortWallet(p.referrer_wallet)}
+                              </span>
+                            ) : (
+                              <span style={{ color: "#3f3f46", fontSize: "12px" }}>—</span>
+                            )}
+                          </td>
+                          <td style={{ ...S.td, fontFamily: "monospace", fontSize: "11px", color: "#52525b" }}>
+                            {shortTx(p.signature)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+
+              {/* Cashout details */}
+              <div style={{ marginTop: "20px" }}>
+                <div style={{ ...S.label, marginBottom: "10px" }}>Cashout details</div>
+                <div style={{
+                  background: "#18181b", border: "1px solid #27272a",
+                  borderRadius: "10px", padding: "14px 16px",
+                  fontSize: "13px", lineHeight: "2",
+                }}>
+                  <div>
+                    <span style={{ color: "#71717a" }}>Sent to: </span>
+                    <span style={{ fontFamily: "monospace" }}>
+                      {batch.cashout_wallet ? batch.cashout_wallet : "—"}
+                    </span>
+                  </div>
+                  <div>
+                    <span style={{ color: "#71717a" }}>Amount: </span>
+                    {fmtSol(batch.cashout_sol)} ({fmtGbp(batch.cashout_gbp)})
+                  </div>
+                  <div>
+                    <span style={{ color: "#71717a" }}>Tx signature: </span>
+                    <span style={{ fontFamily: "monospace" }}>{shortTx(batch.cashout_tx_signature)}</span>
+                  </div>
+                  <div>
+                    <span style={{ color: "#71717a" }}>Completed: </span>
+                    {fmtDate(batch.cashout_at ?? batch.completed_at)}
+                  </div>
+                </div>
+              </div>
+
+              {/* Affiliate payouts table */}
+              {batch.affiliate_payouts.length > 0 && (
+                <div style={{ marginTop: "20px" }}>
+                  <div style={{ ...S.label, marginBottom: "10px" }}>
+                    Affiliate payouts — {batch.affiliate_payouts.length}
+                  </div>
+                  <table style={S.table}>
+                    <thead>
+                      <tr>
+                        <th style={S.th}>Wallet</th>
+                        <th style={S.th}>Amount SOL</th>
+                        <th style={S.th}>Amount GBP</th>
+                        <th style={S.th}>Payments</th>
+                        <th style={S.th}>Paid at</th>
+                        <th style={S.th}>Tx signature</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {batch.affiliate_payouts.map((p) => (
+                        <tr key={p.id}>
+                          <td style={S.td}>
+                            <span style={{ fontFamily: "monospace", fontSize: "12px" }}>
+                              {shortWallet(p.referrer_wallet)}
+                            </span>
+                          </td>
+                          <td style={S.td}>{fmtSol(p.amount_sol)}</td>
+                          <td style={{ ...S.td, color: "#71717a" }}>{p.payment_count}</td>
+                          <td style={{ ...S.td, color: "#71717a" }}>{fmtDate(p.paid_at)}</td>
+                          <td style={{ ...S.td, fontFamily: "monospace", fontSize: "11px", color: "#52525b" }}>
+                            {shortTx(p.tx_signature)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
               )}
-            </div>
-            <div style={S.statBox}>
-              <div style={{ ...S.label, color: "#22c55e" }}>Bid winner revenue</div>
-              <div style={S.val}>{batch.bidding_winner_count} winners</div>
-              {payments && (
-                <div style={S.sub}>
-                  {fmtSol(payments
-                    .filter((p) => p.kind === "bidding_ad_winner")
-                    .reduce((s: number, p) => s + Number(p.amount_sol), 0))}
+
+              {batch.affiliate_payouts.length === 0 && (
+                <div style={{ marginTop: "16px", color: "#52525b", fontSize: "13px" }}>
+                  No affiliate payouts for this batch.
                 </div>
               )}
-            </div>
-
-            <div style={S.statBox}>
-              <div style={S.label}>Affiliate payouts</div>
-              <div style={S.val}>{fmtSol(batch.total_affiliate_sol)}</div>
-              <div style={S.sub}>{fmtGbp(batch.total_affiliate_gbp)}</div>
-            </div>
-            <div style={S.statBox}>
-              <div style={S.label}>Your cashout</div>
-              <div style={{ ...S.val, color: "#22c55e" }}>
-                {fmtSol(batch.cashout_sol ?? batch.your_cut_sol)}
-              </div>
-              <div style={S.sub}>
-                {fmtGbp(batch.cashout_gbp ?? batch.your_cut_gbp)}
-              </div>
-            </div>
-          </div>
-
-          {/* ── Per-wallet payment log ─────────────────────────────── */}
-          <div style={{ marginTop: "24px" }}>
-            <div style={{ ...S.label, marginBottom: "10px" }}>
-              Individual payments — full wallet log
-            </div>
-
-            {loadingPay && (
-              <div style={{ color: "#52525b", fontSize: "13px" }}>Loading…</div>
-            )}
-
-            {!loadingPay && payments !== null && payments.length === 0 && (
-              <div style={{ color: "#52525b", fontSize: "13px" }}>
-                No payments recorded in this batch.
-              </div>
-            )}
-
-            {!loadingPay && payments && payments.length > 0 && (
-              <table style={S.table}>
-                <thead>
-                  <tr>
-                    <th style={S.th}>Time</th>
-                    <th style={S.th}>Wallet</th>
-                    <th style={S.th}>Payment for</th>
-                    <th style={S.th}>Amount</th>
-                    <th style={S.th}>Referrer</th>
-                    <th style={S.th}>Tx</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {payments.map((p) => (
-                    <tr key={p.signature}>
-                      <td style={{ ...S.td, color: "#71717a", whiteSpace: "nowrap" as const }}>
-                        {fmtDate(p.created_at)}
-                      </td>
-                      <td style={S.td}>
-                        <span style={{ fontFamily: "monospace", fontSize: "12px" }}>
-                          {shortWallet(p.wallet)}
-                        </span>
-                      </td>
-                      <td style={S.td}>
-                        <span style={{
-                          display:      "inline-block",
-                          padding:      "2px 7px",
-                          borderRadius: "999px",
-                          fontSize:     "11px",
-                          fontWeight:   600,
-                          background:   `${kindColor(p.kind)}22`,
-                          color:        kindColor(p.kind),
-                        }}>
-                          {kindLabel(p.kind)}
-                        </span>
-                      </td>
-                      <td style={S.td}>
-                        <div>{fmtSol(Number(p.amount_sol))}</div>
-                        {solGbpPrice && (
-                          <div style={S.sub}>
-                            {fmtGbp(Math.round(Number(p.amount_sol) * solGbpPrice * 100) / 100)}
-                          </div>
-                        )}
-                      </td>
-                      <td style={S.td}>
-                        {p.referrer_wallet ? (
-                          <span style={{ fontFamily: "monospace", fontSize: "12px", color: "#71717a" }}>
-                            {shortWallet(p.referrer_wallet)}
-                          </span>
-                        ) : (
-                          <span style={{ color: "#3f3f46", fontSize: "12px" }}>—</span>
-                        )}
-                      </td>
-                      <td style={{ ...S.td, fontFamily: "monospace", fontSize: "11px", color: "#52525b" }}>
-                        {shortTx(p.signature)}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-          </div>
-
-          {/* Cashout details */}
-          <div style={{ marginTop: "20px" }}>
-            <div style={{ ...S.label, marginBottom: "10px" }}>Cashout details</div>
-            <div style={{
-              background:   "#18181b",
-              border:       "1px solid #27272a",
-              borderRadius: "10px",
-              padding:      "14px 16px",
-              fontSize:     "13px",
-              lineHeight:   "2",
-            }}>
-              <div>
-                <span style={{ color: "#71717a" }}>Sent to: </span>
-                <span style={{ fontFamily: "monospace" }}>
-                  {batch.cashout_wallet ? batch.cashout_wallet : "—"}
-                </span>
-              </div>
-              <div>
-                <span style={{ color: "#71717a" }}>Amount: </span>
-                {fmtSol(batch.cashout_sol)} ({fmtGbp(batch.cashout_gbp)})
-              </div>
-              <div>
-                <span style={{ color: "#71717a" }}>Tx signature: </span>
-                <span style={{ fontFamily: "monospace" }}>
-                  {shortTx(batch.cashout_tx_signature)}
-                </span>
-              </div>
-              <div>
-                <span style={{ color: "#71717a" }}>Completed: </span>
-                {fmtDate(batch.cashout_at ?? batch.completed_at)}
-              </div>
-            </div>
-          </div>
-
-          {/* Affiliate payouts table */}
-          {batch.affiliate_payouts.length > 0 && (
-            <div style={{ marginTop: "20px" }}>
-              <div style={{ ...S.label, marginBottom: "10px" }}>
-                Affiliate payouts — {batch.affiliate_payouts.length}
-              </div>
-              <table style={S.table}>
-                <thead>
-                  <tr>
-                    <th style={S.th}>Wallet</th>
-                    <th style={S.th}>Amount SOL</th>
-                    <th style={S.th}>Amount GBP</th>
-                    <th style={S.th}>Payments</th>
-                    <th style={S.th}>Paid at</th>
-                    <th style={S.th}>Tx signature</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {batch.affiliate_payouts.map((p) => (
-                    <tr key={p.id}>
-                      <td style={S.td}>
-                        <span style={{ fontFamily: "monospace", fontSize: "12px" }}>
-                          {shortWallet(p.referrer_wallet)}
-                        </span>
-                      </td>
-                      <td style={S.td}>{fmtSol(p.amount_sol)}</td>
-                      <td style={S.td}>
-                        {fmtGbp(
-                          solGbpPrice
-                            ? Math.round(p.amount_sol * solGbpPrice * 100) / 100
-                            : null
-                        )}
-                      </td>
-                      <td style={{ ...S.td, color: "#71717a" }}>{p.payment_count}</td>
-                      <td style={{ ...S.td, color: "#71717a" }}>
-                        {fmtDate(p.paid_at)}
-                      </td>
-                      <td style={{ ...S.td, fontFamily: "monospace", fontSize: "11px", color: "#52525b" }}>
-                        {shortTx(p.tx_signature)}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-
-          {batch.affiliate_payouts.length === 0 && (
-            <div style={{ marginTop: "16px", color: "#52525b", fontSize: "13px" }}>
-              No affiliate payouts for this batch.
-            </div>
+            </>
           )}
 
           {/* Period info */}
@@ -497,22 +535,109 @@ function BatchRow({ batch, solGbpPrice }: { batch: Batch; solGbpPrice: number | 
   );
 }
 
-// ─── Main page ────────────────────────────────────────────────────────────────
+// ─── Month group accordion ────────────────────────────────────────────────────
 
+function MonthGroupCard({
+  group,
+  solGbpPrice,
+  defaultOpen,
+}: {
+  group:       MonthGroup;
+  solGbpPrice: number | null;
+  defaultOpen: boolean;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+
+  const hasRevenue   = group.totalRevSol > 0;
+  const revGbp       = solGbpPrice
+    ? Math.round(group.totalRevSol * solGbpPrice * 100) / 100
+    : null;
+  const daysWithRev  = group.batches.filter((b) => b.total_revenue_sol > 0).length;
+
+  function downloadMonthly(e: React.MouseEvent) {
+    e.stopPropagation();
+    window.open(`/api/batches/export-month?year=${group.year}&month=${group.month}`, "_blank");
+  }
+
+  return (
+    <div style={S.monthCard}>
+      {/* Month header */}
+      <div style={S.monthHeader} onClick={() => setOpen((o) => !o)}>
+        <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+          <span style={{ color: "#52525b", fontSize: "14px" }}>
+            {open ? "▾" : "▸"}
+          </span>
+          <div>
+            <div style={{ fontWeight: 700, fontSize: "16px" }}>{group.label}</div>
+            <div style={S.sub}>
+              {group.batches.length} day{group.batches.length !== 1 ? "s" : ""}
+              {" · "}
+              {hasRevenue
+                ? `${fmtSol(Math.round(group.totalRevSol * 1e9) / 1e9)} revenue${revGbp ? ` (${fmtGbp(revGbp)})` : ""}`
+                : "No revenue"}
+              {daysWithRev > 0 && ` · ${daysWithRev} active day${daysWithRev !== 1 ? "s" : ""}`}
+            </div>
+          </div>
+        </div>
+
+        <div style={{ display: "flex", alignItems: "center", gap: "10px", flexShrink: 0 }}>
+          {/* Month stats pills */}
+          {hasRevenue && (
+            <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+              <div style={{
+                background: "rgba(34,197,94,0.08)", border: "1px solid rgba(34,197,94,0.2)",
+                borderRadius: "8px", padding: "4px 10px", fontSize: "12px", fontWeight: 600,
+                color: "#22c55e",
+              }}>
+                {fmtSol(Math.round(group.totalCashSol * 1e9) / 1e9)} cashed out
+              </div>
+            </div>
+          )}
+
+          {/* Monthly download button */}
+          <button
+            style={{
+              ...S.btn("secondary"),
+              display: "flex", alignItems: "center", gap: "5px",
+            }}
+            onClick={downloadMonthly}
+          >
+            <span style={{ fontSize: "12px" }}>↓</span>
+            Monthly report
+          </button>
+        </div>
+      </div>
+
+      {/* Month body — individual batches */}
+      {open && (
+        <div style={S.monthBody}>
+          <div style={{ marginTop: "12px" }}>
+            {group.batches.map((b) => (
+              <BatchRow key={b.id} batch={b} solGbpPrice={solGbpPrice} />
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Main page ────────────────────────────────────────────────────────────────
 
 export default function HistoryPage() {
   const router = useRouter();
 
-  const [loading,     setLoading]     = useState(true);
-  const [err,         setErr]         = useState<string | null>(null);
-  const [batches,     setBatches]     = useState<Batch[]>([]);
-  const [solGbpPrice, setSolGbpPrice] = useState<number | null>(null);
+  const [loading,      setLoading]      = useState(true);
+  const [err,          setErr]          = useState<string | null>(null);
+  const [monthGroups,  setMonthGroups]  = useState<MonthGroup[]>([]);
+  const [solGbpPrice,  setSolGbpPrice]  = useState<number | null>(null);
 
-  // Totals
-  const [totalRevSol,  setTotalRevSol]  = useState(0);
-  const [totalRevGbp,  setTotalRevGbp]  = useState<number | null>(null);
-  const [totalAffSol,  setTotalAffSol]  = useState(0);
-  const [totalCashSol, setTotalCashSol] = useState(0);
+  // All-time totals
+  const [totalRevSol,   setTotalRevSol]   = useState(0);
+  const [totalRevGbp,   setTotalRevGbp]   = useState<number | null>(null);
+  const [totalAffSol,   setTotalAffSol]   = useState(0);
+  const [totalCashSol,  setTotalCashSol]  = useState(0);
+  const [totalBatches,  setTotalBatches]  = useState(0);
 
   const load = useCallback(async () => {
     try {
@@ -524,12 +649,13 @@ export default function HistoryPage() {
       }
 
       const all: Batch[] = json.batches ?? [];
-      // History shows only complete batches, newest first
       const complete = all.filter((b) => b.status === "complete");
-      setBatches(complete);
-      setSolGbpPrice(json.solGbpPrice ?? null);
 
-      // Compute all-time totals
+      const groups = groupByMonth(complete);
+      setMonthGroups(groups);
+      setSolGbpPrice(json.solGbpPrice ?? null);
+      setTotalBatches(complete.length);
+
       const revSol  = complete.reduce((s, b) => s + b.total_revenue_sol,           0);
       const affSol  = complete.reduce((s, b) => s + b.total_affiliate_sol,         0);
       const cashSol = complete.reduce((s, b) => s + (b.cashout_sol ?? b.your_cut_sol), 0);
@@ -554,7 +680,7 @@ export default function HistoryPage() {
       color:      "#e4e4e7",
       padding:    "24px",
     }}>
-      <div style={{ maxWidth: "860px", margin: "0 auto" }}>
+      <div style={{ maxWidth: "900px", margin: "0 auto" }}>
 
         {/* Top bar */}
         <div style={{
@@ -566,18 +692,18 @@ export default function HistoryPage() {
           <div>
             <h1 style={{ fontSize: "20px", fontWeight: 700 }}>History</h1>
             <div style={{ ...S.sub, marginTop: "4px" }}>
-              {batches.length} completed batch{batches.length !== 1 ? "es" : ""}
+              {monthGroups.length} month{monthGroups.length !== 1 ? "s" : ""}
+              {totalBatches > 0 && ` · ${totalBatches} days recorded`}
             </div>
           </div>
           <a href="/" style={S.btn("secondary")}>← Dashboard</a>
         </div>
 
         {/* All-time totals */}
-        {batches.length > 0 && (
+        {totalBatches > 0 && (
           <div style={{
             ...S.card,
-            padding:      "18px 20px",
-            marginBottom: "24px",
+            padding: "18px 20px", marginBottom: "28px",
           }}>
             <div style={{ ...S.label, marginBottom: "14px" }}>All-time totals</div>
             <div style={{
@@ -599,8 +725,12 @@ export default function HistoryPage() {
                 <div style={{ ...S.val, color: "#22c55e" }}>{fmtSol(totalCashSol)}</div>
               </div>
               <div style={S.statBox}>
-                <div style={S.label}>Batches</div>
-                <div style={S.val}>{batches.length}</div>
+                <div style={S.label}>Months</div>
+                <div style={S.val}>{monthGroups.length}</div>
+              </div>
+              <div style={S.statBox}>
+                <div style={S.label}>Days recorded</div>
+                <div style={S.val}>{totalBatches}</div>
               </div>
             </div>
           </div>
@@ -612,29 +742,28 @@ export default function HistoryPage() {
 
         {err && (
           <div style={{
-            padding:    "12px 16px",
-            borderRadius: "10px",
-            background: "rgba(239,68,68,0.1)",
-            border:     "1px solid rgba(239,68,68,0.25)",
-            color:      "#f87171",
-            fontSize:   "13px",
-            marginBottom: "16px",
+            padding: "12px 16px", borderRadius: "10px",
+            background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.25)",
+            color: "#f87171", fontSize: "13px", marginBottom: "16px",
           }}>
             {err}
           </div>
         )}
 
-        {/* Batch list */}
-        {batches.map((b) => (
-          <BatchRow key={b.id} batch={b} solGbpPrice={solGbpPrice} />
+        {/* Month groups */}
+        {monthGroups.map((grp, i) => (
+          <MonthGroupCard
+            key={grp.key}
+            group={grp}
+            solGbpPrice={solGbpPrice}
+            defaultOpen={i === 0}
+          />
         ))}
 
-        {!loading && batches.length === 0 && (
+        {!loading && monthGroups.length === 0 && (
           <div style={{
-            textAlign: "center",
-            padding:   "48px 24px",
-            color:     "#52525b",
-            fontSize:  "14px",
+            textAlign: "center", padding: "48px 24px",
+            color: "#52525b", fontSize: "14px",
           }}>
             No completed batches yet. Completed batches will appear here.
           </div>
