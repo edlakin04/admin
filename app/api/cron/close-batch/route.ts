@@ -116,17 +116,24 @@ export async function GET(req: Request) {
       .reduce((sum, a) => sum + a.totalSol, 0);
 
     // ── 6. Close the current batch ───────────────────────────────────────────
+    // If zero revenue and no affiliates, skip straight to 'complete' so the
+    // day is saved to history automatically without any manual action needed.
+    const now = new Date().toISOString();
+    const isZeroRevenue = totalRevenueSol === 0 && affiliateMap.size === 0;
+    const finalStatus   = isZeroRevenue ? "complete" : "closed";
+
     const { error: closeErr } = await sb
       .from("batches")
       .update({
-        status:             "closed",
-        total_revenue_sol:  Math.round(totalRevenueSol  * 1e9) / 1e9,
+        status:              finalStatus,
+        total_revenue_sol:   Math.round(totalRevenueSol   * 1e9) / 1e9,
         total_affiliate_sol: Math.round(totalAffiliateSol * 1e9) / 1e9,
         user_sub_count:          userSubCount,
         dev_sub_count:           devSubCount,
         bidding_entry_count:     biddingEntryCount,
         bidding_winner_count:    biddingWinnerCount,
-        closed_at:          new Date().toISOString(),
+        closed_at:           now,
+        ...(isZeroRevenue ? { completed_at: now } : {}),
       })
       .eq("id", openBatch.id);
 
@@ -162,7 +169,7 @@ export async function GET(req: Request) {
 
     return NextResponse.json({
       ok:                  true,
-      action:              "batch_closed",
+      action:              isZeroRevenue ? "batch_auto_completed_zero_revenue" : "batch_closed",
       batchId:             openBatch.id,
       periodStart,
       periodEnd,
