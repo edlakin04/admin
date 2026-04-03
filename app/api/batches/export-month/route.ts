@@ -221,6 +221,33 @@ export async function GET(req: Request) {
     lines.push(line("Your cut:",          `${fmtSol(Math.round(totalCashSol * 1e9) / 1e9)}  (${fmtGbp(totalCashGbp)})`));
     lines.push("");
 
+    // ── Per-batch cashout breakdown ───────────────────────────────────────────
+    lines.push(divider());
+    lines.push("  CASHOUT DETAILS — PER DAY");
+    lines.push(divider());
+    lines.push("");
+    lines.push(`  ${"Date".padEnd(14)} ${"Amount SOL".padEnd(18)} ${"Amount GBP".padEnd(14)} ${"Wallet".padEnd(46)} Tx Signature`);
+    lines.push(`  ${"-".repeat(110)}`);
+
+    for (const b of batchList) {
+      const cashSol = Number(b.cashout_sol ?? 0);
+      const cashGbp = solGbpPrice ? Math.round(cashSol * solGbpPrice * 100) / 100 : null;
+      const dateStr = fmtDateShort(b.period_start).padEnd(14);
+
+      if (cashSol === 0) {
+        lines.push(`  ${dateStr} ${"— (no revenue)".padEnd(18)} ${"—".padEnd(14)} ${"—".padEnd(46)} —`);
+      } else {
+        const solStr    = fmtSol(cashSol).padEnd(18);
+        const gbpStr    = fmtGbp(cashGbp).padEnd(14);
+        const wallet    = (b.cashout_wallet ?? "—").padEnd(46);
+        const txSig     = b.cashout_tx_signature
+          ? `${b.cashout_tx_signature.slice(0, 8)}…${b.cashout_tx_signature.slice(-8)}`
+          : "—";
+        lines.push(`  ${dateStr} ${solStr} ${gbpStr} ${wallet} ${txSig}`);
+      }
+    }
+    lines.push("");
+
     // ── Daily breakdown ───────────────────────────────────────────────────────
     lines.push(divider());
     lines.push("  DAILY BREAKDOWN");
