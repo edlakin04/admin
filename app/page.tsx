@@ -657,6 +657,7 @@ export default function AdminDashboard() {
             </div>
           </div>
           <div style={{ display: "flex", gap: "8px" }}>
+            <a href="/stats" style={S.btn("secondary")}>Stats</a>
             <a href="/vat" style={S.btn("secondary")}>VAT</a>
             <a href="/history" style={S.btn("secondary")}>History</a>
             <button style={S.btn("ghost")} onClick={logout}>Log out</button>
