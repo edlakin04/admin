@@ -4,7 +4,7 @@ import { supabaseAdmin } from "@/lib/supabaseAdmin";
 export const dynamic = "force-dynamic";
 
 // ─── GET /api/cron/close-batch ────────────────────────────────────────────────
-// Called by Vercel cron at midnight UK time every night (see vercel.json).
+// Called by Vercel cron at midnight UTC every night (see vercel.json).
 // Also callable manually via GET with ?secret=ADMIN_CRON_SECRET for testing.
 //
 // What it does:
@@ -12,14 +12,13 @@ export const dynamic = "force-dynamic";
 // 2. Snapshots all payments that came in during that batch period
 // 3. Computes total revenue + affiliate totals
 // 4. Builds batch_affiliate_payouts rows (one per affiliate)
-// 5. Marks the batch as 'closed'
-// 6. Opens a new batch for the next 24 hours
+// 5. Marks the batch as 'closed' (or 'complete' if zero revenue)
+// 6. If missed days exist, fills them with auto-completed empty batches
+// 7. Opens a new batch for the current day
 
 export async function GET(req: Request) {
   try {
     // ── Auth ────────────────────────────────────────────────────────────────
-    // Vercel cron sends the secret as "Authorization: Bearer SECRET"
-    // Manual calls can use ?secret=SECRET or x-cron-secret header
     const { searchParams } = new URL(req.url);
     const cronSecret = process.env.ADMIN_CRON_SECRET;
 
@@ -27,8 +26,8 @@ export async function GET(req: Request) {
       return NextResponse.json({ error: "ADMIN_CRON_SECRET not configured" }, { status: 500 });
     }
 
-    const authHeader  = (req.headers.get("authorization") ?? "").trim();
-    const secretParam = (searchParams.get("secret") ?? "").trim();
+    const authHeader   = (req.headers.get("authorization") ?? "").trim();
+    const secretParam  = (searchParams.get("secret") ?? "").trim();
     const secretHeader = (req.headers.get("x-cron-secret") ?? "").trim();
 
     const authorized =
@@ -55,8 +54,7 @@ export async function GET(req: Request) {
     }
 
     if (!openBatch) {
-      // No open batch — create one for today and return
-      // This is a recovery case (e.g. first run after SQL setup)
+      // No open batch — create one for the current London day
       await createNextBatch(sb);
       return NextResponse.json({ ok: true, action: "created_first_batch" });
     }
@@ -65,7 +63,6 @@ export async function GET(req: Request) {
     const periodEnd   = openBatch.period_end;
 
     // ── 2. Snapshot all payments in this batch period ────────────────────────
-    // Pull every payment that was made during this batch window
     const { data: payments, error: payErr } = await sb
       .from("payments")
       .select("wallet, kind, amount_sol, referrer_wallet, created_at")
@@ -82,13 +79,12 @@ export async function GET(req: Request) {
     const totalRevenueSol = paymentList.reduce(
       (sum, p) => sum + Number(p.amount_sol ?? 0), 0
     );
-    const userSubCount           = paymentList.filter((p) => p.kind === "subscription").length;
-    const devSubCount            = paymentList.filter((p) => p.kind === "dev_fee").length;
-    const biddingEntryCount      = paymentList.filter((p) => p.kind === "bidding_ad_entry").length;
-    const biddingWinnerCount     = paymentList.filter((p) => p.kind === "bidding_ad_winner").length;
+    const userSubCount       = paymentList.filter((p) => p.kind === "subscription").length;
+    const devSubCount        = paymentList.filter((p) => p.kind === "dev_fee").length;
+    const biddingEntryCount  = paymentList.filter((p) => p.kind === "bidding_ad_entry").length;
+    const biddingWinnerCount = paymentList.filter((p) => p.kind === "bidding_ad_winner").length;
 
     // ── 4. Pull affiliate earnings for this batch period ─────────────────────
-    // affiliate_earnings rows that were created during this batch window
     const { data: earnings, error: earnErr } = await sb
       .from("affiliate_earnings")
       .select("referrer_wallet, amount_sol, payment_signature, kind")
@@ -142,7 +138,6 @@ export async function GET(req: Request) {
     }
 
     // ── 7. Insert batch_affiliate_payouts rows ────────────────────────────────
-    // One row per affiliate — what they're owed from this batch
     if (affiliateMap.size > 0) {
       const payoutRows = Array.from(affiliateMap.entries()).map(
         ([wallet, data]) => ({
@@ -159,13 +154,48 @@ export async function GET(req: Request) {
         .insert(payoutRows);
 
       if (insertErr) {
-        // Log but don't fail — batch is already closed
         console.error("Failed to insert affiliate payout rows:", insertErr.message);
       }
     }
 
-    // ── 8. Open the next batch ───────────────────────────────────────────────
-    await createNextBatch(sb);
+    // ── 8. Fill any missed days between this batch and today ──────────────────
+    // If the cron missed a few days, create auto-completed empty batches for
+    // each gap day so history has an unbroken daily record.
+    const filledDays: string[] = [];
+    const nowMs       = Date.now();
+    let nextStart     = new Date(openBatch.period_end); // start right after closed batch
+
+    while (nextStart.getTime() + 24 * 3600_000 <= nowMs) {
+      // This day's period has already fully passed — auto-complete it
+      const nextEnd = new Date(nextStart.getTime() + 24 * 3600_000);
+      const fillNow = new Date().toISOString();
+
+      await sb.from("batches").insert({
+        period_start:        nextStart.toISOString(),
+        period_end:          nextEnd.toISOString(),
+        status:              "complete",
+        total_revenue_sol:   0,
+        total_affiliate_sol: 0,
+        user_sub_count:      0,
+        dev_sub_count:       0,
+        bidding_entry_count: 0,
+        bidding_winner_count:0,
+        closed_at:           fillNow,
+        completed_at:        fillNow,
+      });
+
+      filledDays.push(nextStart.toISOString().slice(0, 10));
+      nextStart = nextEnd;
+    }
+
+    // ── 9. Create the current open batch ─────────────────────────────────────
+    // Starts from where the last closed/filled batch ended
+    const currentPeriodEnd = new Date(nextStart.getTime() + 24 * 3600_000);
+    await sb.from("batches").insert({
+      period_start: nextStart.toISOString(),
+      period_end:   currentPeriodEnd.toISOString(),
+      status:       "open",
+    });
 
     return NextResponse.json({
       ok:                  true,
@@ -181,6 +211,7 @@ export async function GET(req: Request) {
       biddingWinnerCount,
       affiliateCount:      affiliateMap.size,
       paymentCount:        paymentList.length,
+      filledDays,
     });
 
   } catch (e: any) {
@@ -192,18 +223,12 @@ export async function GET(req: Request) {
   }
 }
 
-// ─── Helper: create the next open batch ──────────────────────────────────────
-// Computes the next midnight-to-midnight UK window and inserts it.
+// ─── Helper: create the next open batch (recovery only) ──────────────────────
+// Used when there's no open batch at all. Creates one for the current London day.
 
 async function createNextBatch(sb: ReturnType<typeof supabaseAdmin>) {
-  // Get current UK time
-  // We compute this by calling Supabase with a timezone cast
-  // to avoid any server timezone issues on Vercel's edge
   const now = new Date();
 
-  // Convert to UK midnight
-  // UK is UTC+0 (GMT) or UTC+1 (BST) — we use a simple offset approach:
-  // Get today's date string in London time, then compute midnight UTC for it
   const londonDateStr = now.toLocaleDateString("en-GB", {
     timeZone: "Europe/London",
     year:     "numeric",
@@ -211,18 +236,16 @@ async function createNextBatch(sb: ReturnType<typeof supabaseAdmin>) {
     day:      "2-digit",
   });
 
-  // londonDateStr is "DD/MM/YYYY" — parse it
+  // londonDateStr is "DD/MM/YYYY"
   const [day, month, year] = londonDateStr.split("/").map(Number);
 
-  // Next midnight in London = start of tomorrow in London
-  const tomorrowLondon = new Date(
-    Date.UTC(year, month - 1, day + 1, 0, 0, 0, 0)
+  // Today's midnight in London (not tomorrow)
+  const todayLondon = new Date(
+    Date.UTC(year, month - 1, day, 0, 0, 0, 0)
   );
 
-  // Adjust for BST (last Sunday in March to last Sunday in October)
-  // Simple check: if London is UTC+1, subtract 1 hour from our UTC midnight
-  const bstOffset = getLondonUtcOffset(tomorrowLondon);
-  const periodStart = new Date(tomorrowLondon.getTime() - bstOffset * 3600_000);
+  const bstOffset   = getLondonUtcOffset(todayLondon);
+  const periodStart = new Date(todayLondon.getTime() - bstOffset * 3600_000);
   const periodEnd   = new Date(periodStart.getTime() + 24 * 3600_000);
 
   await sb.from("batches").insert({
@@ -234,17 +257,15 @@ async function createNextBatch(sb: ReturnType<typeof supabaseAdmin>) {
 
 // Returns the UTC offset for London time on a given date (0 or 1)
 function getLondonUtcOffset(date: Date): number {
-  // BST starts last Sunday in March, ends last Sunday in October
-  const year  = date.getUTCFullYear();
+  const year     = date.getUTCFullYear();
   const bstStart = lastSundayOf(year, 2); // March = month index 2
   const bstEnd   = lastSundayOf(year, 9); // October = month index 9
   return date >= bstStart && date < bstEnd ? 1 : 0;
 }
 
 function lastSundayOf(year: number, month: number): Date {
-  // Find last Sunday of the given month (UTC)
-  const lastDay = new Date(Date.UTC(year, month + 1, 0)); // last day of month
-  const dayOfWeek = lastDay.getUTCDay(); // 0 = Sunday
-  const offset = dayOfWeek === 0 ? 0 : dayOfWeek;
+  const lastDay   = new Date(Date.UTC(year, month + 1, 0));
+  const dayOfWeek = lastDay.getUTCDay();
+  const offset    = dayOfWeek === 0 ? 0 : dayOfWeek;
   return new Date(lastDay.getTime() - offset * 86_400_000);
 }
